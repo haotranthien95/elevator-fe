@@ -5,7 +5,13 @@ import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 
 type Building = { id: string; name: string };
 type Equipment = { id: string; equipmentType: string; equipmentCode: string };
 type PartItem = { name: string; quantity: string };
-type PhotoItem = { name: string; url: string };
+type PhotoItem = {
+  name: string;
+  url: string;
+  dataUrl: string;
+  mimeType: string;
+  size: number;
+};
 
 type ChecklistGroup = {
   category: string;
@@ -96,6 +102,48 @@ const checklistByType: Record<string, ChecklistGroup[]> = {
   ],
 };
 
+const MAX_PHOTO_COUNT = 5;
+const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
+
+const createInitialFormData = () => ({
+  buildingId: "",
+  equipmentType: "",
+  equipmentId: "",
+  maintenanceType: "Scheduled/Preventive Maintenance",
+  arrivalDateTime: new Date().toISOString().slice(0, 16),
+  technicianName: "Ko Aung Mya Oo",
+  checklistState: {} as Record<string, boolean>,
+  issuesFound: "",
+  partsReplaced: "no",
+  parts: [{ name: "", quantity: "1" }] as PartItem[],
+  photos: [] as PhotoItem[],
+  additionalNotes: "",
+  customerMessage: "",
+  completionDate: "",
+  completionTime: "",
+  customerName: "",
+  customerTitle: "",
+  techSignature: "",
+  techSignatureLocked: false,
+  customerSignature: "",
+  customerSignatureLocked: false,
+});
+
+const fileToDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error(`Could not read file: ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+const formatStatusLabel = (value: string) =>
+  value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
 export default function Home() {
   const [step, setStep] = useState(1);
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -104,6 +152,7 @@ export default function Home() {
   const [submitMessage, setSubmitMessage] = useState("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successReportCode, setSuccessReportCode] = useState<string | null>(null);
+  const [successStatus, setSuccessStatus] = useState<string | null>(null);
   const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const techCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -111,29 +160,7 @@ export default function Home() {
   const isDrawingTechRef = useRef(false);
   const isDrawingCustomerRef = useRef(false);
 
-  const [formData, setFormData] = useState({
-    buildingId: "",
-    equipmentType: "",
-    equipmentId: "",
-    maintenanceType: "Scheduled/Preventive Maintenance",
-    arrivalDateTime: new Date().toISOString().slice(0, 16),
-    technicianName: "Ko Aung Mya Oo",
-    checklistState: {} as Record<string, boolean>,
-    issuesFound: "",
-    partsReplaced: "no",
-    parts: [{ name: "", quantity: "1" }] as PartItem[],
-    photos: [] as PhotoItem[],
-    additionalNotes: "",
-    customerMessage: "",
-    completionDate: "",
-    completionTime: "",
-    customerName: "",
-    customerTitle: "",
-    techSignature: "",
-    techSignatureLocked: false,
-    customerSignature: "",
-    customerSignatureLocked: false,
-  });
+  const [formData, setFormData] = useState(createInitialFormData);
 
   const arrivalDate = formData.arrivalDateTime.split("T")[0] ?? "";
   const arrivalTime = formData.arrivalDateTime.split("T")[1] ?? "";
@@ -298,24 +325,67 @@ export default function Home() {
     }));
   };
 
-  const onPhotoUpload = (event: ChangeEvent<HTMLInputElement>) => {
+  const onPhotoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
-    const nextPhotos = files.map((file) => ({
-      name: file.name,
-      url: URL.createObjectURL(file),
-    }));
-    setFormData((prev) => ({
-      ...prev,
-      photos: [...prev.photos, ...nextPhotos],
-    }));
+    if (files.length === 0) {
+      return;
+    }
+
+    const remainingSlots = Math.max(0, MAX_PHOTO_COUNT - formData.photos.length);
+    if (remainingSlots === 0) {
+      setSubmitMessage(`You can upload up to ${MAX_PHOTO_COUNT} photos only.`);
+      event.target.value = "";
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remainingSlots);
+    const oversizedFiles = selectedFiles.filter((file) => file.size > MAX_PHOTO_SIZE_BYTES);
+    const acceptedFiles = selectedFiles.filter((file) => file.size <= MAX_PHOTO_SIZE_BYTES);
+
+    if (oversizedFiles.length > 0) {
+      setSubmitMessage(
+        `Some files were skipped because they are larger than ${Math.round(
+          MAX_PHOTO_SIZE_BYTES / (1024 * 1024),
+        )}MB.`,
+      );
+    }
+
+    if (acceptedFiles.length > 0) {
+      const nextPhotos = await Promise.all(
+        acceptedFiles.map(async (file) => ({
+          name: file.name,
+          url: URL.createObjectURL(file),
+          dataUrl: await fileToDataUrl(file),
+          mimeType: file.type || "image/png",
+          size: file.size,
+        })),
+      );
+
+      setFormData((prev) => ({
+        ...prev,
+        photos: [...prev.photos, ...nextPhotos],
+      }));
+    }
+
+    if (files.length > remainingSlots) {
+      setSubmitMessage(`Only the first ${MAX_PHOTO_COUNT} photos were kept.`);
+    }
+
     event.target.value = "";
   };
 
   const removePhoto = (targetIndex: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      photos: prev.photos.filter((_, index) => index !== targetIndex),
-    }));
+    setFormData((prev) => {
+      const targetPhoto = prev.photos[targetIndex];
+      if (targetPhoto) {
+        URL.revokeObjectURL(targetPhoto.url);
+      }
+
+      return {
+        ...prev,
+        photos: prev.photos.filter((_, index) => index !== targetIndex),
+      };
+    });
   };
 
   const getTechCanvasContext = () => {
@@ -525,6 +595,17 @@ export default function Home() {
     }));
   };
 
+  const resetForm = () => {
+    formData.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
+    setShowSuccessModal(false);
+    setSuccessReportCode(null);
+    setSuccessStatus(null);
+    setStep(1);
+    setSubmitMessage("");
+    setStepErrors({});
+    setFormData(createInitialFormData());
+  };
+
   const goNext = () => {
     const errors = getStepErrors(step);
     if (Object.keys(errors).length > 0) {
@@ -566,6 +647,14 @@ export default function Home() {
                 }))
             : [],
         remarks: remarksParts.join(" | "),
+        photos: formData.photos.map((photo) => ({
+          name: photo.name,
+          mimeType: photo.mimeType,
+          size: photo.size,
+          dataUrl: photo.dataUrl,
+        })),
+        technicianSignature: formData.techSignature,
+        customerSignature: formData.customerSignature,
       };
 
       const res = await fetch(`${API_BASE_URL}/maintenance-reports`, {
@@ -580,6 +669,7 @@ export default function Home() {
       }
 
       setSuccessReportCode(result.data.reportCode ?? null);
+      setSuccessStatus(result.data.status ?? null);
       setShowSuccessModal(true);
     } catch (error) {
       setSubmitMessage(error instanceof Error ? error.message : "Could not submit report");
@@ -592,18 +682,27 @@ export default function Home() {
     <div className="min-h-screen bg-slate-100">
       <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-white shadow-lg">
         <header className="bg-[#1b3c7b] px-4 py-3 text-white shadow-md">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 items-center justify-center rounded-md bg-white px-2.5">
-              <span className="text-[11px] leading-tight font-bold text-[#1b3c7b]">
-                YOMA
-                <br />
-                ELEVATOR
-              </span>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 items-center justify-center rounded-md bg-white px-2.5">
+                <span className="text-[11px] leading-tight font-bold text-[#1b3c7b]">
+                  YOMA
+                  <br />
+                  ELEVATOR
+                </span>
+              </div>
+              <div>
+                <h1 className="text-base font-bold leading-tight">Maintenance Service Report</h1>
+                <p className="text-xs text-white/80">Scheduled/Preventive Maintenance</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base font-bold leading-tight">Maintenance Service Report</h1>
-              <p className="text-xs text-white/80">Scheduled/Preventive Maintenance</p>
-            </div>
+
+            <a
+              href="/admin"
+              className="rounded-md border border-white/30 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-white/20"
+            >
+              Admin Portal
+            </a>
           </div>
         </header>
 
@@ -908,7 +1007,9 @@ export default function Home() {
                   className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-[#f59e0b] hover:bg-amber-50"
                 >
                   <span className="text-sm font-semibold text-slate-700">Tap to upload photos</span>
-                  <span className="mt-1 text-xs text-slate-500">PNG, JPG, WEBP - You can select multiple images</span>
+                  <span className="mt-1 text-xs text-slate-500">
+                    PNG, JPG, WEBP - up to {MAX_PHOTO_COUNT} images, max 5MB each
+                  </span>
                 </label>
                 <input
                   id="photo-upload"
@@ -1180,7 +1281,26 @@ export default function Home() {
                 <div>Parts replaced: {formData.partsReplaced}</div>
                 <div>Photos: {formData.photos.length}</div>
                 <div>Customer: {formData.customerName || "-"}</div>
+                <div>Initial Ticket Status: pending</div>
               </section>
+
+              {formData.photos.length > 0 && (
+                <section className="rounded-xl border-2 border-slate-300 bg-white p-4 text-sm">
+                  <h3 className="mb-3 border-b-2 border-slate-200 pb-2 text-sm font-bold text-[#1b3c7b]">
+                    Photo Evidence
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {formData.photos.map((photo, idx) => (
+                      <figure key={`${photo.name}-${idx}`} className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                        <img src={photo.url} alt={photo.name} className="h-24 w-full object-cover" />
+                        <figcaption className="truncate px-2 py-1 text-[11px] text-slate-600" title={photo.name}>
+                          {photo.name}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section className="rounded-xl border-2 border-slate-300 bg-white p-4 text-sm">
                 <h3 className="mb-3 border-b-2 border-slate-200 pb-2 text-sm font-bold text-[#1b3c7b]">
@@ -1290,39 +1410,20 @@ export default function Home() {
                   </p>
                 </div>
               )}
+              {successStatus && (
+                <div className="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-700">
+                    Initial Ticket Status
+                  </p>
+                  <p className="mt-1 text-base font-bold text-amber-900">
+                    {formatStatusLabel(successStatus)}
+                  </p>
+                </div>
+              )}
             </div>
             <button
               className="w-full rounded-xl bg-[#1b3c7b] py-3 text-sm font-bold text-white hover:bg-[#15306a] active:scale-95 transition-transform"
-              onClick={() => {
-                setShowSuccessModal(false);
-                setSuccessReportCode(null);
-                setStep(1);
-                setSubmitMessage("");
-                setStepErrors({});
-                setFormData({
-                  buildingId: "",
-                  equipmentType: "",
-                  equipmentId: "",
-                  maintenanceType: "Scheduled/Preventive Maintenance",
-                  arrivalDateTime: new Date().toISOString().slice(0, 16),
-                  technicianName: "Ko Aung Mya Oo",
-                  checklistState: {},
-                  issuesFound: "",
-                  partsReplaced: "no",
-                  parts: [{ name: "", quantity: "1" }],
-                  photos: [],
-                  additionalNotes: "",
-                  customerMessage: "",
-                  completionDate: "",
-                  completionTime: "",
-                  customerName: "",
-                  customerTitle: "",
-                  techSignature: "",
-                  techSignatureLocked: false,
-                  customerSignature: "",
-                  customerSignatureLocked: false,
-                });
-              }}
+              onClick={resetForm}
             >
               Close
             </button>
