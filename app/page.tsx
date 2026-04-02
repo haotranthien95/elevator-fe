@@ -1,0 +1,1334 @@
+"use client";
+
+import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+
+type Building = { id: string; name: string };
+type Equipment = { id: string; equipmentType: string; equipmentCode: string };
+type PartItem = { name: string; quantity: string };
+type PhotoItem = { name: string; url: string };
+
+type ChecklistGroup = {
+  category: string;
+  items: string[];
+};
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
+
+const stepTitles = [
+  "Basic Information",
+  "Service Checklist",
+  "Issues & Parts",
+  "Photos & Notes",
+  "Signatures",
+  "Review & Submit",
+];
+
+const stepDescriptions = [
+  "Enter service visit details",
+  "Complete inspection items",
+  "Report any problems or replacements",
+  "Attach evidence and notes",
+  "Capture completion and signatures",
+  "Please review all information before submitting",
+];
+
+const checklistByType: Record<string, ChecklistGroup[]> = {
+  Elevator: [
+    {
+      category: "Machine Room",
+      items: [
+        "General condition",
+        "Traction machine/motor",
+        "Control panel",
+        "Electromagnetic brake",
+      ],
+    },
+    {
+      category: "Car",
+      items: [
+        "Push buttons",
+        "Position indicator",
+        "Door interlock",
+        "Emergency light",
+      ],
+    },
+    {
+      category: "Hall",
+      items: [
+        "Hall buttons",
+        "Door operation",
+        "Guide shoes",
+        "General condition",
+      ],
+    },
+  ],
+  Escalator: [
+    {
+      category: "Operation",
+      items: [
+        "Operating conditions",
+        "Step and track condition",
+        "Handrail condition",
+        "Driving machine",
+      ],
+    },
+    {
+      category: "Safety",
+      items: [
+        "Emergency stop button",
+        "Safety switches",
+        "Fall prevention fence",
+        "Skirt guard",
+      ],
+    },
+  ],
+  default: [
+    {
+      category: "General",
+      items: [
+        "Overall operation",
+        "Safety devices",
+        "Door and panel condition",
+        "Abnormal noise/vibration",
+      ],
+    },
+  ],
+};
+
+export default function Home() {
+  const [step, setStep] = useState(1);
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
+  const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successReportCode, setSuccessReportCode] = useState<string | null>(null);
+  const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const techCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const customerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawingTechRef = useRef(false);
+  const isDrawingCustomerRef = useRef(false);
+
+  const [formData, setFormData] = useState({
+    buildingId: "",
+    equipmentType: "",
+    equipmentId: "",
+    maintenanceType: "Scheduled/Preventive Maintenance",
+    arrivalDateTime: new Date().toISOString().slice(0, 16),
+    technicianName: "Ko Aung Mya Oo",
+    checklistState: {} as Record<string, boolean>,
+    issuesFound: "",
+    partsReplaced: "no",
+    parts: [{ name: "", quantity: "1" }] as PartItem[],
+    photos: [] as PhotoItem[],
+    additionalNotes: "",
+    customerMessage: "",
+    completionDate: "",
+    completionTime: "",
+    customerName: "",
+    customerTitle: "",
+    techSignature: "",
+    techSignatureLocked: false,
+    customerSignature: "",
+    customerSignatureLocked: false,
+  });
+
+  const arrivalDate = formData.arrivalDateTime.split("T")[0] ?? "";
+  const arrivalTime = formData.arrivalDateTime.split("T")[1] ?? "";
+  const completionDate = formData.completionDate;
+  const completionTime = formData.completionTime;
+
+  const selectedChecklist =
+    checklistByType[formData.equipmentType] ?? checklistByType.default;
+
+  useEffect(() => {
+    const nextChecklist: Record<string, boolean> = {};
+    selectedChecklist.forEach((group, groupIndex) => {
+      group.items.forEach((_, itemIndex) => {
+        const key = `${groupIndex}-${itemIndex}`;
+        nextChecklist[key] = formData.checklistState[key] ?? false;
+      });
+    });
+
+    setFormData((prev) => ({
+      ...prev,
+      checklistState: nextChecklist,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.equipmentType]);
+
+  useEffect(() => {
+    const initLookups = async () => {
+      try {
+        const [buildingsRes, typesRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/equipment/buildings`),
+          fetch(`${API_BASE_URL}/equipment/types`),
+        ]);
+        const buildingsPayload = await buildingsRes.json();
+        const typesPayload = await typesRes.json();
+        setBuildings(buildingsPayload.data ?? []);
+        setEquipmentTypes(
+          (typesPayload.data ?? []).map((item: { equipmentType: string }) => item.equipmentType),
+        );
+      } catch {
+        setSubmitMessage("Cannot load lookup data. Please ensure backend is running.");
+      }
+    };
+
+    void initLookups();
+  }, []);
+
+  useEffect(() => {
+    const fetchEquipment = async () => {
+      if (!formData.buildingId) {
+        setEquipmentList([]);
+        return;
+      }
+
+      const query = new URLSearchParams({ buildingId: formData.buildingId });
+      if (formData.equipmentType) {
+        query.set("equipmentType", formData.equipmentType);
+      }
+
+      const res = await fetch(`${API_BASE_URL}/equipment/by-building?${query.toString()}`);
+      const payload = await res.json();
+      setEquipmentList(payload.data ?? []);
+    };
+
+    void fetchEquipment();
+  }, [formData.buildingId, formData.equipmentType]);
+
+  const checkedCount = useMemo(
+    () => Object.values(formData.checklistState).filter(Boolean).length,
+    [formData.checklistState],
+  );
+
+  const totalCount = useMemo(
+    () => Object.keys(formData.checklistState).length,
+    [formData.checklistState],
+  );
+
+  const updateField = (field: string, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const getStepErrors = (currentStep: number): Record<string, string> => {
+    const errors: Record<string, string> = {};
+
+    if (currentStep === 1) {
+      if (!formData.buildingId) errors.buildingId = "Building is required";
+      if (!formData.equipmentType) errors.equipmentType = "Equipment type is required";
+      if (!formData.equipmentId) errors.equipmentId = "Equipment ID is required";
+      if (!arrivalDate) errors.arrivalDate = "Arrival date is required";
+      if (!arrivalTime) errors.arrivalTime = "Arrival time is required";
+    }
+
+    if (currentStep === 2) {
+      if (checkedCount < 1) errors.checklist = "Please check at least one checklist item";
+    }
+
+    if (currentStep === 5) {
+      if (!formData.completionDate) errors.completionDate = "Completion date is required";
+      if (!formData.completionTime) errors.completionTime = "Completion time is required";
+      if (!formData.customerName) errors.customerName = "Customer name is required";
+      if (!formData.techSignature) errors.techSignature = "Technician signature is required";
+      if (!formData.customerSignature) errors.customerSignature = "Customer signature is required";
+    }
+
+    return errors;
+  };
+
+  useEffect(() => {
+    if (Object.keys(stepErrors).length === 0) {
+      return;
+    }
+    setStepErrors(getStepErrors(step));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData, step, checkedCount]);
+
+  const updateArrival = (date: string, time: string) => {
+    if (!date && !time) {
+      updateField("arrivalDateTime", "");
+      return;
+    }
+    const normalizedDate = date || new Date().toISOString().slice(0, 10);
+    const normalizedTime = time || "00:00";
+    updateField("arrivalDateTime", `${normalizedDate}T${normalizedTime}`);
+  };
+
+  const updateCompletion = (date: string, time: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      completionDate: date,
+      completionTime: time,
+    }));
+  };
+
+  const toggleChecklist = (key: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      checklistState: {
+        ...prev.checklistState,
+        [key]: !prev.checklistState[key],
+      },
+    }));
+  };
+
+  const updatePart = (index: number, key: keyof PartItem, value: string) => {
+    setFormData((prev) => {
+      const next = [...prev.parts];
+      next[index] = { ...next[index], [key]: value };
+      return { ...prev, parts: next };
+    });
+  };
+
+  const addPart = () => {
+    setFormData((prev) => ({
+      ...prev,
+      parts: [...prev.parts, { name: "", quantity: "1" }],
+    }));
+  };
+
+  const removePart = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      parts: prev.parts.filter((_, i) => i !== index),
+    }));
+  };
+
+  const onPhotoUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    const nextPhotos = files.map((file) => ({
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+    setFormData((prev) => ({
+      ...prev,
+      photos: [...prev.photos, ...nextPhotos],
+    }));
+    event.target.value = "";
+  };
+
+  const removePhoto = (targetIndex: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      photos: prev.photos.filter((_, index) => index !== targetIndex),
+    }));
+  };
+
+  const getTechCanvasContext = () => {
+    const canvas = techCanvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+    return { canvas, context };
+  };
+
+  const initTechCanvas = () => {
+    const drawing = getTechCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    drawing.context.fillStyle = "#ffffff";
+    drawing.context.fillRect(0, 0, drawing.canvas.width, drawing.canvas.height);
+    drawing.context.strokeStyle = "#111827";
+    drawing.context.lineWidth = 2;
+    drawing.context.lineCap = "round";
+    drawing.context.lineJoin = "round";
+  };
+
+  const getCustomerCanvasContext = () => {
+    const canvas = customerCanvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+    return { canvas, context };
+  };
+
+  const initCustomerCanvas = () => {
+    const drawing = getCustomerCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    drawing.context.fillStyle = "#ffffff";
+    drawing.context.fillRect(0, 0, drawing.canvas.width, drawing.canvas.height);
+    drawing.context.strokeStyle = "#111827";
+    drawing.context.lineWidth = 2;
+    drawing.context.lineCap = "round";
+    drawing.context.lineJoin = "round";
+  };
+
+  useEffect(() => {
+    initTechCanvas();
+    initCustomerCanvas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const getCanvasPoint = (
+    event: PointerEvent<HTMLCanvasElement>,
+    canvas: HTMLCanvasElement,
+  ) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) * canvas.width) / rect.width,
+      y: ((event.clientY - rect.top) * canvas.height) / rect.height,
+    };
+  };
+
+  const startTechDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (formData.techSignatureLocked) {
+      return;
+    }
+    const drawing = getTechCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    const point = getCanvasPoint(event, drawing.canvas);
+    drawing.context.beginPath();
+    drawing.context.moveTo(point.x, point.y);
+    isDrawingTechRef.current = true;
+  };
+
+  const moveTechDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (formData.techSignatureLocked) {
+      return;
+    }
+    if (!isDrawingTechRef.current) {
+      return;
+    }
+    const drawing = getTechCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    const point = getCanvasPoint(event, drawing.canvas);
+    drawing.context.lineTo(point.x, point.y);
+    drawing.context.stroke();
+  };
+
+  const endTechDrawing = () => {
+    if (formData.techSignatureLocked) {
+      return;
+    }
+    if (!isDrawingTechRef.current) {
+      return;
+    }
+    isDrawingTechRef.current = false;
+    const drawing = getTechCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    updateField("techSignature", drawing.canvas.toDataURL("image/png"));
+  };
+
+  const clearTechSignature = () => {
+    setFormData((prev) => ({
+      ...prev,
+      techSignature: "",
+      techSignatureLocked: false,
+    }));
+    initTechCanvas();
+  };
+
+  const markTechSignature = () => {
+    if (!formData.techSignature) {
+      setStepErrors((prev) => ({
+        ...prev,
+        techSignature: "Technician signature is required",
+      }));
+      setSubmitMessage("Please draw technician signature before marking as signed.");
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      techSignatureLocked: true,
+    }));
+  };
+
+  const startCustomerDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (formData.customerSignatureLocked) {
+      return;
+    }
+    const drawing = getCustomerCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    const point = getCanvasPoint(event, drawing.canvas);
+    drawing.context.beginPath();
+    drawing.context.moveTo(point.x, point.y);
+    isDrawingCustomerRef.current = true;
+  };
+
+  const moveCustomerDrawing = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (formData.customerSignatureLocked) {
+      return;
+    }
+    if (!isDrawingCustomerRef.current) {
+      return;
+    }
+    const drawing = getCustomerCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    const point = getCanvasPoint(event, drawing.canvas);
+    drawing.context.lineTo(point.x, point.y);
+    drawing.context.stroke();
+  };
+
+  const endCustomerDrawing = () => {
+    if (formData.customerSignatureLocked) {
+      return;
+    }
+    if (!isDrawingCustomerRef.current) {
+      return;
+    }
+    isDrawingCustomerRef.current = false;
+    const drawing = getCustomerCanvasContext();
+    if (!drawing) {
+      return;
+    }
+    updateField("customerSignature", drawing.canvas.toDataURL("image/png"));
+  };
+
+  const clearCustomerSignature = () => {
+    setFormData((prev) => ({
+      ...prev,
+      customerSignature: "",
+      customerSignatureLocked: false,
+    }));
+    initCustomerCanvas();
+  };
+
+  const markCustomerSignature = () => {
+    if (!formData.customerSignature) {
+      setStepErrors((prev) => ({
+        ...prev,
+        customerSignature: "Customer signature is required",
+      }));
+      setSubmitMessage("Please draw customer signature before marking as signed.");
+      return;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      customerSignatureLocked: true,
+    }));
+  };
+
+  const goNext = () => {
+    const errors = getStepErrors(step);
+    if (Object.keys(errors).length > 0) {
+      setStepErrors(errors);
+      setSubmitMessage("Please complete required information in this step.");
+      return;
+    }
+    setStepErrors({});
+    setSubmitMessage("");
+    setStep((prev) => Math.min(6, prev + 1));
+  };
+
+  const submitReport = async () => {
+    setLoading(true);
+    setSubmitMessage("");
+
+    try {
+      const remarksParts = [
+        formData.issuesFound ? `Issues: ${formData.issuesFound}` : "",
+        formData.additionalNotes ? `Notes: ${formData.additionalNotes}` : "",
+        formData.customerMessage ? `Customer message: ${formData.customerMessage}` : "",
+      ].filter(Boolean);
+
+      const payload = {
+        buildingId: formData.buildingId,
+        equipmentId: formData.equipmentId,
+        maintenanceType: formData.maintenanceType,
+        arrivalDateTime: new Date(formData.arrivalDateTime).toISOString(),
+        technicianName: formData.technicianName,
+        findings: `${checkedCount}/${totalCount} checklist items checked`,
+        workPerformed: formData.partsReplaced === "yes" ? "Parts replaced" : "Routine service",
+        partsUsed:
+          formData.partsReplaced === "yes"
+            ? formData.parts
+                .filter((part) => part.name.trim())
+                .map((part) => ({
+                  name: part.name,
+                  quantity: Number(part.quantity || "1"),
+                }))
+            : [],
+        remarks: remarksParts.join(" | "),
+      };
+
+      const res = await fetch(`${API_BASE_URL}/maintenance-reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.message ?? "Submit failed");
+      }
+
+      setSuccessReportCode(result.data.reportCode ?? null);
+      setShowSuccessModal(true);
+    } catch (error) {
+      setSubmitMessage(error instanceof Error ? error.message : "Could not submit report");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100">
+      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-white shadow-lg">
+        <header className="bg-[#1b3c7b] px-4 py-3 text-white shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 items-center justify-center rounded-md bg-white px-2.5">
+              <span className="text-[11px] leading-tight font-bold text-[#1b3c7b]">
+                YOMA
+                <br />
+                ELEVATOR
+              </span>
+            </div>
+            <div>
+              <h1 className="text-base font-bold leading-tight">Maintenance Service Report</h1>
+              <p className="text-xs text-white/80">Scheduled/Preventive Maintenance</p>
+            </div>
+          </div>
+        </header>
+
+        <div className="bg-white p-4 shadow-sm">
+          <div className="relative mb-2 flex items-center justify-between">
+            <div className="absolute inset-x-0 top-1/2 z-[1] h-[3px] -translate-y-1/2 bg-slate-200" />
+            <div
+              className="absolute left-0 top-1/2 z-[1] h-[3px] -translate-y-1/2 bg-[#f59e0b] transition-all duration-300"
+              style={{ width: `${((step - 1) / 5) * 100}%` }}
+            />
+            {stepTitles.map((_, index) => {
+              const current = index + 1;
+              const active = current === step;
+              const completed = current < step;
+              return (
+                <div
+                  key={current}
+                  className={`relative z-[2] flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold transition-all ${
+                    active
+                      ? "scale-110 bg-[#1b3c7b] text-white"
+                      : completed
+                        ? "bg-[#f59e0b] text-white"
+                        : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {current}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-center text-xs font-semibold text-slate-500">{stepTitles[step - 1]}</p>
+        </div>
+
+        <main className="flex-1 overflow-y-auto px-4 py-5">
+          <h2 className="mb-1 text-2xl font-bold text-[#1b3c7b]">{stepTitles[step - 1]}</h2>
+          <p className="mb-6 text-[15px] text-slate-500">{stepDescriptions[step - 1]}</p>
+
+          {step === 1 && (
+            <div className="space-y-5">
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Building Name <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                    stepErrors.buildingId ? "border-red-500 bg-red-50" : "border-slate-300"
+                  }`}
+                  value={formData.buildingId}
+                  onChange={(event) => updateField("buildingId", event.target.value)}
+                >
+                  <option value="">Select building...</option>
+                  {buildings.map((building) => (
+                    <option key={building.id} value={building.id}>
+                      {building.name}
+                    </option>
+                  ))}
+                </select>
+                {stepErrors.buildingId && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{stepErrors.buildingId}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Equipment Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                    stepErrors.equipmentType ? "border-red-500 bg-red-50" : "border-slate-300"
+                  }`}
+                  value={formData.equipmentType}
+                  onChange={(event) => {
+                    updateField("equipmentType", event.target.value);
+                    updateField("equipmentId", "");
+                  }}
+                >
+                  <option value="">Select equipment type...</option>
+                  {equipmentTypes.map((equipmentType) => (
+                    <option key={equipmentType} value={equipmentType}>
+                      {equipmentType}
+                    </option>
+                  ))}
+                </select>
+                {stepErrors.equipmentType && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{stepErrors.equipmentType}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Equipment ID <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base disabled:cursor-not-allowed disabled:bg-slate-100 ${
+                    stepErrors.equipmentId ? "border-red-500 bg-red-50" : "border-slate-300"
+                  }`}
+                  value={formData.equipmentId}
+                  disabled={!formData.equipmentType}
+                  onChange={(event) => updateField("equipmentId", event.target.value)}
+                >
+                  <option value="">
+                    {formData.equipmentType ? "Select equipment..." : "Select equipment type first..."}
+                  </option>
+                  {equipmentList.map((equipment) => (
+                    <option key={equipment.id} value={equipment.id}>
+                      {equipment.equipmentCode}
+                    </option>
+                  ))}
+                </select>
+                {stepErrors.equipmentId && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{stepErrors.equipmentId}</p>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="text-[15px] font-semibold text-slate-900">
+                    Arrival Date &amp; Time <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    className="rounded-full bg-[#f59e0b] px-4 py-1.5 text-sm font-bold text-white"
+                    type="button"
+                    onClick={() => updateField("arrivalDateTime", new Date().toISOString().slice(0, 16))}
+                  >
+                    Now
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                      stepErrors.arrivalDate ? "border-red-500 bg-red-50" : "border-slate-300"
+                    }`}
+                    type="date"
+                    value={arrivalDate}
+                    onChange={(event) => updateArrival(event.target.value, arrivalTime)}
+                  />
+                  <input
+                    className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                      stepErrors.arrivalTime ? "border-red-500 bg-red-50" : "border-slate-300"
+                    }`}
+                    type="time"
+                    value={arrivalTime}
+                    onChange={(event) => updateArrival(arrivalDate, event.target.value)}
+                  />
+                </div>
+                {(stepErrors.arrivalDate || stepErrors.arrivalTime) && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    {stepErrors.arrivalDate || stepErrors.arrivalTime}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Technician Name
+                </label>
+                <input
+                  className="h-12 w-full rounded-lg border-2 border-slate-300 bg-slate-100 px-3 text-base text-slate-500"
+                  value={formData.technicianName}
+                  readOnly
+                />
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-6">
+              {!formData.equipmentType && (
+                <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
+                  Please select equipment type in Basic Information.
+                </div>
+              )}
+
+              {selectedChecklist.map((group, groupIndex) => (
+                <div key={group.category} className="mb-6">
+                  <div className="mb-3 rounded-lg bg-[hsl(222,60%,96%)] p-3 text-[17px] font-bold text-[#1b3c7b]">
+                    {group.category}
+                  </div>
+                  {group.items.map((item, itemIndex) => {
+                    const key = `${groupIndex}-${itemIndex}`;
+                    const checked = formData.checklistState[key];
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => toggleChecklist(key)}
+                        className={`mb-3 flex w-full items-center rounded-lg border-2 bg-white p-4 text-left transition-all ${
+                          checked
+                            ? "border-[#f59e0b] bg-[hsl(35,80%,95%)]"
+                            : "border-slate-300"
+                        }`}
+                      >
+                        <div
+                          className={`mr-3.5 flex h-7 w-7 min-w-[1.75rem] items-center justify-center rounded-lg border-[3px] ${
+                            checked ? "border-[#f59e0b] bg-[#f59e0b] text-white" : "border-slate-300"
+                          }`}
+                        >
+                          {checked ? "OK" : ""}
+                        </div>
+                        <span className="text-[15px] font-medium text-slate-800">{item}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <div className="rounded-lg border-2 border-slate-300 bg-slate-50 p-3 text-sm">
+                {stepErrors.checklist && (
+                  <p className="mb-2 rounded-md bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">
+                    {stepErrors.checklist}
+                  </p>
+                )}
+                Checked: {checkedCount}/{totalCount}
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-5">
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Any issues or abnormalities?
+                </label>
+                <textarea
+                  className="min-h-[120px] w-full rounded-lg border-2 border-slate-300 bg-white p-3 text-base"
+                  placeholder="Describe any issues found during inspection..."
+                  value={formData.issuesFound}
+                  onChange={(event) => updateField("issuesFound", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mb-3 block text-[15px] font-semibold text-slate-900">
+                  Did you replace any parts?
+                </label>
+                <div className="space-y-3">
+                  {["no", "yes"].map((choice) => (
+                    <button
+                      key={choice}
+                      type="button"
+                      onClick={() => updateField("partsReplaced", choice)}
+                      className={`flex w-full items-center rounded-lg border-2 p-4 text-left capitalize ${
+                        formData.partsReplaced === choice
+                          ? "border-[#f59e0b] bg-[hsl(35,80%,95%)]"
+                          : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      <span className="text-[15px] font-medium">{choice}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {formData.partsReplaced === "yes" && (
+                <div className="space-y-3 rounded-lg border-2 border-slate-300 bg-slate-50 p-3">
+                  <p className="text-sm font-semibold text-slate-700">Parts</p>
+                  {formData.parts.map((part, index) => (
+                    <div key={`part-${index}`} className="grid grid-cols-5 gap-2">
+                      <input
+                        className="col-span-3 h-11 rounded-lg border-2 border-slate-300 px-3 text-sm"
+                        placeholder="Part name"
+                        value={part.name}
+                        onChange={(event) => updatePart(index, "name", event.target.value)}
+                      />
+                      <input
+                        className="col-span-1 h-11 rounded-lg border-2 border-slate-300 px-3 text-sm"
+                        type="number"
+                        min="1"
+                        value={part.quantity}
+                        onChange={(event) => updatePart(index, "quantity", event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="col-span-1 h-11 rounded-lg bg-slate-200 text-sm font-semibold"
+                        onClick={() => removePart(index)}
+                        disabled={formData.parts.length === 1}
+                      >
+                        Del
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-semibold text-white"
+                    onClick={addPart}
+                  >
+                    Add Part
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-5">
+              <div className="rounded-lg border-2 border-slate-300 bg-white p-3">
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Photos
+                </label>
+                <label
+                  htmlFor="photo-upload"
+                  className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center hover:border-[#f59e0b] hover:bg-amber-50"
+                >
+                  <span className="text-sm font-semibold text-slate-700">Tap to upload photos</span>
+                  <span className="mt-1 text-xs text-slate-500">PNG, JPG, WEBP - You can select multiple images</span>
+                </label>
+                <input
+                  id="photo-upload"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={onPhotoUpload}
+                  className="hidden"
+                />
+                <p className="mt-2 text-sm text-slate-600">Uploaded: {formData.photos.length}</p>
+                {formData.photos.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {formData.photos.map((photo, idx) => (
+                      <figure key={`${photo.name}-${idx}`} className="relative overflow-hidden rounded-md border border-slate-300 bg-slate-50">
+                        <img
+                          src={photo.url}
+                          alt={photo.name}
+                          className="h-20 w-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(idx)}
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-xs font-bold text-white"
+                          aria-label={`Remove ${photo.name}`}
+                        >
+                          x
+                        </button>
+                        <figcaption className="truncate px-1 py-1 text-[10px] text-slate-600" title={photo.name}>
+                          {photo.name}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Additional Notes
+                </label>
+                <textarea
+                  className="min-h-[120px] w-full rounded-lg border-2 border-slate-300 bg-white p-3 text-base"
+                  placeholder="Any additional comments or observations..."
+                  value={formData.additionalNotes}
+                  onChange={(event) => updateField("additionalNotes", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Customer Message
+                </label>
+                <textarea
+                  className="min-h-[90px] w-full rounded-lg border-2 border-slate-300 bg-white p-3 text-base"
+                  placeholder="Message to include in customer report..."
+                  value={formData.customerMessage}
+                  onChange={(event) => updateField("customerMessage", event.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-5">
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="text-[15px] font-semibold text-slate-900">
+                    Completion Date &amp; Time <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    className="rounded-full bg-[#f59e0b] px-4 py-1.5 text-sm font-bold text-white"
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      updateCompletion(
+                        now.toISOString().slice(0, 10),
+                        now.toTimeString().slice(0, 5),
+                      );
+                    }}
+                  >
+                    Now
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                      stepErrors.completionDate ? "border-red-500 bg-red-50" : "border-slate-300"
+                    }`}
+                    type="date"
+                    value={completionDate}
+                    onChange={(event) => updateCompletion(event.target.value, completionTime)}
+                  />
+                  <input
+                    className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                      stepErrors.completionTime ? "border-red-500 bg-red-50" : "border-slate-300"
+                    }`}
+                    type="time"
+                    value={completionTime}
+                    onChange={(event) => updateCompletion(completionDate, event.target.value)}
+                  />
+                </div>
+                {(stepErrors.completionDate || stepErrors.completionTime) && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    {stepErrors.completionDate || stepErrors.completionTime}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[15px] font-semibold text-slate-900">
+                  Building Representative <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className={`h-12 w-full rounded-lg border-2 bg-white px-3 text-base ${
+                    stepErrors.customerName ? "border-red-500 bg-red-50" : "border-slate-300"
+                  }`}
+                  value={formData.customerName}
+                  onChange={(event) => updateField("customerName", event.target.value)}
+                  placeholder="Full Name"
+                />
+                {stepErrors.customerName && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{stepErrors.customerName}</p>
+                )}
+              </div>
+
+              <div>
+                <input
+                  className="h-12 w-full rounded-lg border-2 border-slate-300 bg-white px-3 text-base"
+                  value={formData.customerTitle}
+                  onChange={(event) => updateField("customerTitle", event.target.value)}
+                  placeholder="Title / Position (optional)"
+                />
+              </div>
+
+              <div
+                className={`rounded-lg border-2 bg-slate-50 p-3 ${
+                  stepErrors.techSignature ? "border-red-500" : "border-slate-300"
+                }`}
+              >
+                <p className="mb-2 text-[15px] font-semibold text-slate-900">Technician Signature *</p>
+                {stepErrors.techSignature && (
+                  <p className="mb-2 text-xs font-medium text-red-600">{stepErrors.techSignature}</p>
+                )}
+                <div
+                  className={`rounded-lg border-2 border-dashed p-2 ${
+                    stepErrors.techSignature ? "border-red-400 bg-red-50" : "border-slate-300 bg-white"
+                  }`}
+                >
+                  <canvas
+                    ref={techCanvasRef}
+                    width={560}
+                    height={180}
+                    className={`h-36 w-full touch-none rounded-md ${
+                      stepErrors.techSignature ? "bg-red-50" : "bg-white"
+                    } ${formData.techSignatureLocked ? "cursor-not-allowed opacity-70" : ""}`}
+                    onPointerDown={startTechDrawing}
+                    onPointerMove={moveTechDrawing}
+                    onPointerUp={endTechDrawing}
+                    onPointerLeave={endTechDrawing}
+                  />
+                  {!formData.techSignature && !formData.techSignatureLocked && (
+                    <p className="mt-2 text-center text-xs text-slate-500">
+                      Sign here: press and drag to draw your signature
+                    </p>
+                  )}
+                  {formData.techSignatureLocked && (
+                    <p className="mt-2 text-center text-xs font-semibold text-emerald-700">
+                      Signature locked. Click Clear / Sign Again to edit.
+                    </p>
+                  )}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white"
+                    onClick={markTechSignature}
+                  >
+                    Mark as Signed
+                  </button>
+                  <button
+                    type="button"
+                    className="h-10 rounded-lg bg-slate-200 px-4 text-sm font-bold text-slate-800"
+                    onClick={clearTechSignature}
+                  >
+                    Clear / Sign Again
+                  </button>
+                </div>
+              </div>
+
+              <div
+                className={`rounded-lg border-2 bg-slate-50 p-3 ${
+                  stepErrors.customerSignature ? "border-red-500" : "border-slate-300"
+                }`}
+              >
+                <p className="mb-2 text-[15px] font-semibold text-slate-900">Customer Signature *</p>
+                {stepErrors.customerSignature && (
+                  <p className="mb-2 text-xs font-medium text-red-600">{stepErrors.customerSignature}</p>
+                )}
+                <div
+                  className={`rounded-lg border-2 border-dashed p-2 ${
+                    stepErrors.customerSignature ? "border-red-400 bg-red-50" : "border-slate-300 bg-white"
+                  }`}
+                >
+                  <canvas
+                    ref={customerCanvasRef}
+                    width={560}
+                    height={180}
+                    className={`h-36 w-full touch-none rounded-md ${
+                      stepErrors.customerSignature ? "bg-red-50" : "bg-white"
+                    } ${formData.customerSignatureLocked ? "cursor-not-allowed opacity-70" : ""}`}
+                    onPointerDown={startCustomerDrawing}
+                    onPointerMove={moveCustomerDrawing}
+                    onPointerUp={endCustomerDrawing}
+                    onPointerLeave={endCustomerDrawing}
+                  />
+                  {!formData.customerSignature && !formData.customerSignatureLocked && (
+                    <p className="mt-2 text-center text-xs text-slate-500">
+                      Sign here: press and drag to draw your signature
+                    </p>
+                  )}
+                  {formData.customerSignatureLocked && (
+                    <p className="mt-2 text-center text-xs font-semibold text-emerald-700">
+                      Signature locked. Click Clear / Sign Again to edit.
+                    </p>
+                  )}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white"
+                    onClick={markCustomerSignature}
+                  >
+                    Mark as Signed
+                  </button>
+                  <button
+                    type="button"
+                    className="h-10 rounded-lg bg-slate-200 px-4 text-sm font-bold text-slate-800"
+                    onClick={clearCustomerSignature}
+                  >
+                    Clear / Sign Again
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 6 && (
+            <div className="space-y-4">
+              <section className="rounded-xl border-2 border-slate-300 bg-white p-4">
+                <h3 className="mb-3 border-b-2 border-slate-200 pb-2 text-sm font-bold text-[#1b3c7b]">
+                  Basic Information
+                </h3>
+                <dl className="space-y-1.5 text-sm">
+                  <div>Building: {buildings.find((item) => item.id === formData.buildingId)?.name || "-"}</div>
+                  <div>
+                    Equipment: {equipmentList.find((item) => item.id === formData.equipmentId)?.equipmentCode || "-"}
+                  </div>
+                  <div>Service Date: {arrivalDate || "-"}</div>
+                  <div>Arrival: {arrivalTime || "-"}</div>
+                </dl>
+              </section>
+
+              <section className="rounded-xl border-2 border-slate-300 bg-white p-4 text-sm">
+                <h3 className="mb-3 border-b-2 border-slate-200 pb-2 text-sm font-bold text-[#1b3c7b]">
+                  Service Summary
+                </h3>
+                <div>Checklist passed: {checkedCount}/{totalCount}</div>
+                <div>Issues: {formData.issuesFound || "-"}</div>
+                <div>Parts replaced: {formData.partsReplaced}</div>
+                <div>Photos: {formData.photos.length}</div>
+                <div>Customer: {formData.customerName || "-"}</div>
+              </section>
+
+              <section className="rounded-xl border-2 border-slate-300 bg-white p-4 text-sm">
+                <h3 className="mb-3 border-b-2 border-slate-200 pb-2 text-sm font-bold text-[#1b3c7b]">
+                  Signatures
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Technician Signature
+                    </p>
+                    {formData.techSignature ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <img
+                          src={formData.techSignature}
+                          alt="Technician signature"
+                          className="h-28 w-full rounded-md bg-white object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-500">
+                        Not signed yet
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Customer Signature
+                    </p>
+                    {formData.customerSignature ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <img
+                          src={formData.customerSignature}
+                          alt="Customer signature"
+                          className="h-28 w-full rounded-md bg-white object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-500">
+                        Not signed yet
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+        </main>
+
+        <footer className="flex gap-3 bg-white px-4 py-3 shadow-[0_-2px_8px_rgba(0,0,0,0.1)]">
+          {step > 1 && (
+            <button
+              className="h-11 flex-1 rounded-lg bg-slate-200 px-4 text-sm font-bold text-slate-800 disabled:opacity-50"
+              onClick={() => setStep((prev) => Math.max(1, prev - 1))}
+              disabled={loading}
+            >
+              Previous
+            </button>
+          )}
+
+          {step < 6 ? (
+            <button
+              className="h-11 flex-[1.2] rounded-lg bg-[#f59e0b] px-4 text-sm font-bold text-white disabled:opacity-50"
+              onClick={goNext}
+              disabled={loading}
+            >
+              Next
+            </button>
+          ) : (
+            <button
+              className="h-11 flex-[1.2] rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white disabled:opacity-50"
+              onClick={submitReport}
+              disabled={loading}
+            >
+              {loading ? "Submitting..." : "Submit Report"}
+            </button>
+          )}
+        </footer>
+
+        {submitMessage && (
+          <p className="mx-4 mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            {submitMessage}
+          </p>
+        )}
+      </div>
+
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex flex-col items-center gap-3">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+                <svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-bold text-slate-800">Report Submitted!</h2>
+              <p className="text-center text-sm text-slate-500">
+                Your maintenance service report has been submitted successfully.
+              </p>
+              {successReportCode && (
+                <div className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-emerald-700">
+                    Report Code
+                  </p>
+                  <p className="mt-1 text-lg font-bold tracking-[0.15em] text-[#1b3c7b]">
+                    {successReportCode}
+                  </p>
+                </div>
+              )}
+            </div>
+            <button
+              className="w-full rounded-xl bg-[#1b3c7b] py-3 text-sm font-bold text-white hover:bg-[#15306a] active:scale-95 transition-transform"
+              onClick={() => {
+                setShowSuccessModal(false);
+                setSuccessReportCode(null);
+                setStep(1);
+                setSubmitMessage("");
+                setStepErrors({});
+                setFormData({
+                  buildingId: "",
+                  equipmentType: "",
+                  equipmentId: "",
+                  maintenanceType: "Scheduled/Preventive Maintenance",
+                  arrivalDateTime: new Date().toISOString().slice(0, 16),
+                  technicianName: "Ko Aung Mya Oo",
+                  checklistState: {},
+                  issuesFound: "",
+                  partsReplaced: "no",
+                  parts: [{ name: "", quantity: "1" }],
+                  photos: [],
+                  additionalNotes: "",
+                  customerMessage: "",
+                  completionDate: "",
+                  completionTime: "",
+                  customerName: "",
+                  customerTitle: "",
+                  techSignature: "",
+                  techSignatureLocked: false,
+                  customerSignature: "",
+                  customerSignatureLocked: false,
+                });
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
