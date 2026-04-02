@@ -61,18 +61,18 @@ export default function AdminLoginPage() {
           </p>
           <h1 className="mt-3 text-3xl font-semibold">Sign in before entering the management area</h1>
           <p className="mt-3 text-sm text-emerald-50/90 sm:text-base">
-            All `/admin` routes now require an authenticated session. This preview login will be
-            replaced by NestJS-backed authentication in the next phase.
+            All `/admin` routes now use a NestJS-backed JWT session. Sign in here to unlock the
+            dashboard, ticket list, and review actions.
           </p>
 
           <ul className="mt-6 space-y-2 text-sm text-emerald-50/90">
             <li>• Redirects unauthenticated users to this sign-in screen</li>
-            <li>• Keeps the dashboard, list, and detail pages protected</li>
-            <li>• Ready to swap to real JWT login when backend auth is added</li>
+            <li>• Stores a secure JWT in an HttpOnly admin session cookie</li>
+            <li>• Protects the backend ticket-management APIs behind token checks</li>
           </ul>
 
           <div className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4 text-sm">
-            <p className="font-semibold text-white">Preview credentials</p>
+            <p className="font-semibold text-white">Current admin credentials</p>
             <p className="mt-2 text-emerald-50">Email: {PREVIEW_ADMIN_EMAIL}</p>
             <p className="text-emerald-50">Password: {PREVIEW_ADMIN_PASSWORD}</p>
           </div>
@@ -136,7 +136,7 @@ export default function AdminLoginPage() {
             </Link>
 
             <p className="text-xs text-slate-500">
-              Current stage: protected preview login with a session cookie for `/admin` routes.
+              Current stage: live JWT login backed by the NestJS `/api/auth/login` endpoint.
             </p>
           </form>
         </section>

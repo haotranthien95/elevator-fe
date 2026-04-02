@@ -40,6 +40,34 @@ export type WorkOrder = {
   notes: ActivityNote[];
 };
 
+export type AdminReportRecord = {
+  reportCode: string;
+  status: WorkOrderStatus;
+  priority?: Priority;
+  assignedTo?: string | null;
+  maintenanceType?: string | null;
+  technicianName?: string | null;
+  arrivalDateTime?: string | null;
+  submittedAt?: string | null;
+  updatedAt?: string | null;
+  findings?: string | null;
+  workPerformed?: string | null;
+  partsUsed?: Array<{ name: string; quantity: number }> | null;
+  remarks?: string | null;
+  internalNotes?: ActivityNote[] | null;
+  building?: {
+    id: string;
+    name: string;
+  } | null;
+  equipment?: {
+    id: string;
+    equipmentCode: string;
+    equipmentType: string;
+  } | null;
+};
+
+const ADMIN_API_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
 export const statusFilters = [
   { value: "all", label: "All statuses" },
   { value: "pending", label: "Pending" },
@@ -424,12 +452,201 @@ export function getWorkOrderByCode(reportCode: string) {
   return workOrders.find((item) => item.reportCode === reportCode);
 }
 
-export function getDashboardStats() {
-  const responseTimes = workOrders
+function formatDateLabel(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatTimeLabel(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatNoteTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return "Unknown time";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date).replace(",", " ·");
+}
+
+function calculateDurationHours(start: string | null | undefined, end: string | null | undefined) {
+  if (!start || !end) {
+    return null;
+  }
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return null;
+  }
+
+  const diffHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+  return diffHours > 0 ? Math.round(diffHours * 10) / 10 : null;
+}
+
+function normalizeReportCode(report: AdminReportRecord) {
+  const existing = report.reportCode?.trim();
+  if (existing) {
+    return existing;
+  }
+
+  const buildingSlug = (report.building?.name ?? "building")
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 18)
+    .toUpperCase();
+  const timestamp = (report.submittedAt ?? report.arrivalDateTime ?? new Date().toISOString())
+    .replace(/[^0-9]/g, "")
+    .slice(0, 12);
+
+  return `LEGACY-${buildingSlug || "REPORT"}-${timestamp || "000000000000"}`;
+}
+
+export function mapReportToWorkOrder(report: AdminReportRecord): WorkOrder {
+  return {
+    reportCode: normalizeReportCode(report),
+    building: report.building?.name ?? "Unknown building",
+    liftNo: report.equipment?.equipmentCode ?? report.equipment?.equipmentType ?? "—",
+    status: report.status,
+    priority: report.priority ?? "Medium",
+    calledPerson: null,
+    calledTime: report.submittedAt ?? null,
+    issue: report.findings ?? report.remarks ?? report.maintenanceType ?? null,
+    technician: report.assignedTo ?? report.technicianName ?? null,
+    date: formatDateLabel(report.submittedAt ?? report.arrivalDateTime),
+    arrivalTime: formatTimeLabel(report.arrivalDateTime),
+    completionTime:
+      report.status === "submitted" ||
+      report.status === "pc-review" ||
+      report.status === "comm-review" ||
+      report.status === "invoice-ready"
+        ? formatTimeLabel(report.updatedAt)
+        : null,
+    responseTimeMinutes: null,
+    workDurationHours: calculateDurationHours(report.arrivalDateTime, report.updatedAt),
+    rootCause: report.findings ?? null,
+    actionTaken: report.workPerformed ?? report.maintenanceType ?? null,
+    partsReplaced:
+      report.partsUsed?.length
+        ? report.partsUsed.map((part) => `${part.name} (${part.quantity})`).join(", ")
+        : null,
+    pcbTests: [],
+    team: null,
+    engineer: null,
+    notes:
+      report.internalNotes?.map((note) => ({
+        at: formatNoteTimestamp(note.at),
+        author: note.author?.trim() || "System",
+        kind: note.kind ?? "system",
+        text: note.text?.trim() || "No details provided.",
+      })) ?? [],
+  };
+}
+
+export async function getAdminWorkOrders(filters?: {
+  status?: (typeof statusFilters)[number]["value"];
+  limit?: number;
+}) {
+  try {
+    const params = new URLSearchParams();
+    if (filters?.status && filters.status !== "all") {
+      params.set("status", filters.status);
+    }
+    if (filters?.limit) {
+      params.set("limit", String(filters.limit));
+    }
+
+    const response = await fetch(
+      `${ADMIN_API_BASE_URL}/api/admin/reports${params.toString() ? `?${params.toString()}` : ""}`,
+      { cache: "no-store" },
+    );
+
+    if (response.status === 401) {
+      return [];
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to load maintenance reports (${response.status})`);
+    }
+
+    const payload = (await response.json()) as { data?: AdminReportRecord[] };
+    return payload.data?.map(mapReportToWorkOrder) ?? [];
+  } catch (error) {
+    console.error("Falling back to seeded work orders", error);
+    return workOrders;
+  }
+}
+
+export async function getAdminWorkOrderByCode(reportCode: string) {
+  try {
+    const response = await fetch(
+      `${ADMIN_API_BASE_URL}/api/admin/reports/${encodeURIComponent(reportCode)}`,
+      { cache: "no-store" },
+    );
+
+    if (response.status === 401) {
+      return null;
+    }
+
+    if (response.status === 404) {
+      return getWorkOrderByCode(reportCode) ?? null;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to load maintenance report (${response.status})`);
+    }
+
+    const payload = (await response.json()) as { data?: AdminReportRecord };
+    return payload.data ? mapReportToWorkOrder(payload.data) : null;
+  } catch (error) {
+    console.error(`Falling back to seeded work order for ${reportCode}`, error);
+    return getWorkOrderByCode(reportCode) ?? null;
+  }
+}
+
+export function getDashboardStats(source: WorkOrder[] = workOrders) {
+  const responseTimes = source
     .map((item) => item.responseTimeMinutes)
     .filter((value): value is number => value !== null);
 
-  const workDurations = workOrders
+  const workDurations = source
     .map((item) => item.workDurationHours)
     .filter((value): value is number => value !== null);
 
@@ -442,18 +659,19 @@ export function getDashboardStats() {
   ];
 
   return {
-    myQueue: workOrders.filter((item) => openStatuses.includes(item.status)).length,
-    activeJobs: workOrders.filter((item) => item.status === "active").length,
-    pendingReview: workOrders.filter(
+    myQueue: source.filter((item) => openStatuses.includes(item.status)).length,
+    activeJobs: source.filter((item) => item.status === "active").length,
+    pendingReview: source.filter(
       (item) => item.status === "pc-review" || item.status === "comm-review",
     ).length,
-    scheduled: workOrders.filter((item) => item.status === "scheduled").length,
-    avgResponseTime: Math.round(
-      responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length,
-    ),
-    avgWorkDuration:
-      Math.round(
-        (workDurations.reduce((sum, value) => sum + value, 0) / workDurations.length) * 10,
-      ) / 10,
+    scheduled: source.filter((item) => item.status === "scheduled").length,
+    avgResponseTime: responseTimes.length
+      ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length)
+      : 0,
+    avgWorkDuration: workDurations.length
+      ? Math.round(
+          (workDurations.reduce((sum, value) => sum + value, 0) / workDurations.length) * 10,
+        ) / 10
+      : 0,
   };
 }

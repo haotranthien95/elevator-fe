@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { getStatusMeta, statusFilters, type WorkOrder, workOrders } from "../data";
+import { useEffect, useMemo, useState } from "react";
+import { getAdminWorkOrders, getStatusMeta, statusFilters, type Priority, type WorkOrder, workOrders } from "../data";
+
+const PAGE_SIZE = 6;
 
 function matchesQuery(order: WorkOrder, query: string) {
   const normalized = query.trim().toLowerCase();
@@ -29,17 +31,143 @@ function noteTone(kind: WorkOrder["notes"][number]["kind"]) {
   }
 }
 
+function getPriorityRank(priority: Priority) {
+  switch (priority) {
+    case "Critical":
+      return 4;
+    case "High":
+      return 3;
+    case "Medium":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function escapeCsv(value: string | number | null | undefined) {
+  const normalized = String(value ?? "").replace(/"/g, '""');
+  return `"${normalized}"`;
+}
+
 export default function AdminReportsPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<(typeof statusFilters)[number]["value"]>("all");
+  const [sortBy, setSortBy] = useState<"reportCode" | "building" | "technician" | "priority" | "status">("reportCode");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
+  const [orders, setOrders] = useState<WorkOrder[]>(workOrders);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadOrders() {
+      setLoading(true);
+      setLoadError(null);
+
+      try {
+        const nextOrders = await getAdminWorkOrders({ status, limit: 100 });
+        if (isActive) {
+          setOrders(nextOrders);
+        }
+      } catch (error) {
+        console.error("Failed to load admin work orders", error);
+        if (isActive) {
+          setOrders(workOrders);
+          setLoadError("Unable to load live tickets right now. Showing preview data instead.");
+        }
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadOrders();
+
+    return () => {
+      isActive = false;
+    };
+  }, [status]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, status, sortBy, sortOrder]);
 
   const filteredOrders = useMemo(() => {
-    return workOrders.filter((order) => {
+    return orders.filter((order) => {
       const matchesStatus = status === "all" ? true : order.status === status;
       return matchesStatus && matchesQuery(order, query);
     });
-  }, [query, status]);
+  }, [orders, query, status]);
+
+  const sortedOrders = useMemo(() => {
+    const factor = sortOrder === "asc" ? 1 : -1;
+    return [...filteredOrders].sort((left, right) => {
+      if (sortBy === "priority") {
+        return (getPriorityRank(left.priority) - getPriorityRank(right.priority)) * factor;
+      }
+
+      const leftValue =
+        sortBy === "technician"
+          ? left.technician ?? ""
+          : sortBy === "status"
+            ? left.status
+            : left[sortBy];
+      const rightValue =
+        sortBy === "technician"
+          ? right.technician ?? ""
+          : sortBy === "status"
+            ? right.status
+            : right[sortBy];
+
+      return String(leftValue).localeCompare(String(rightValue)) * factor;
+    });
+  }, [filteredOrders, sortBy, sortOrder]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / PAGE_SIZE));
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return sortedOrders.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [currentPage, sortedOrders]);
+
+  const handleExportCsv = () => {
+    const header = [
+      "Report Code",
+      "Building",
+      "Lift No.",
+      "Status",
+      "Priority",
+      "Technician",
+      "Called Person",
+      "Issue",
+    ];
+
+    const rows = sortedOrders.map((order) => [
+      order.reportCode,
+      order.building,
+      order.liftNo,
+      order.status,
+      order.priority,
+      order.technician,
+      order.calledPerson,
+      order.issue,
+    ]);
+
+    const csv = [header, ...rows]
+      .map((row) => row.map((value) => escapeCsv(value)).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `maintenance-reports-${status}-${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
@@ -56,6 +184,14 @@ export default function AdminReportsPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={sortedOrders.length === 0}
+              className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Export CSV
+            </button>
             <Link
               href="/admin"
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
@@ -65,12 +201,12 @@ export default function AdminReportsPage() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-[1.35fr_0.65fr]">
+        <div className="mt-5 grid gap-3 xl:grid-cols-4">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search report code, building, technician..."
-            className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+            className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500 xl:col-span-2"
           />
 
           <select
@@ -86,16 +222,65 @@ export default function AdminReportsPage() {
               </option>
             ))}
           </select>
+
+          <div className="grid grid-cols-2 gap-3">
+            <select
+              value={sortBy}
+              onChange={(event) =>
+                setSortBy(
+                  event.target.value as "reportCode" | "building" | "technician" | "priority" | "status",
+                )
+              }
+              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+            >
+              <option value="reportCode">Sort: Report Code</option>
+              <option value="building">Sort: Building</option>
+              <option value="technician">Sort: Technician</option>
+              <option value="priority">Sort: Priority</option>
+              <option value="status">Sort: Status</option>
+            </select>
+
+            <select
+              value={sortOrder}
+              onChange={(event) => setSortOrder(event.target.value as "asc" | "desc")}
+              className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+            >
+              <option value="desc">Newest / High first</option>
+              <option value="asc">A → Z / Low first</option>
+            </select>
+          </div>
         </div>
       </section>
 
+      {loading ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Loading the latest maintenance reports...
+        </div>
+      ) : null}
+
+      {loadError ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {loadError}
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-2 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+        <p>
+          Showing <span className="font-semibold text-slate-900">{paginatedOrders.length}</span> of{" "}
+          <span className="font-semibold text-slate-900">{sortedOrders.length}</span> matching tickets
+        </p>
+        <p>
+          Page <span className="font-semibold text-slate-900">{currentPage}</span> / {totalPages}
+        </p>
+      </div>
+
       <section className="grid gap-4 xl:grid-cols-2">
-        {filteredOrders.map((order) => {
+        {paginatedOrders.map((order, index) => {
           const meta = getStatusMeta(order.status);
 
           return (
             <article
-              key={order.reportCode}
+              key={`${order.reportCode || "report"}-${index}`}
               className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-emerald-400"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -159,6 +344,32 @@ export default function AdminReportsPage() {
           );
         })}
       </section>
+
+      {sortedOrders.length > PAGE_SIZE ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+          <p>
+            Navigate through the current result set without losing your filters.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={currentPage === 1}
+              className="rounded-xl border border-slate-300 px-3 py-2 font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              disabled={currentPage === totalPages}
+              className="rounded-xl border border-slate-300 px-3 py-2 font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {filteredOrders.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
@@ -230,8 +441,8 @@ export default function AdminReportsPage() {
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {selectedOrder.pcbTests.length > 0 ? (
-                        selectedOrder.pcbTests.map((test) => (
-                          <span key={test} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                        selectedOrder.pcbTests.map((test, index) => (
+                          <span key={`${test || "test"}-${index}`} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
                             {test}
                           </span>
                         ))
@@ -244,8 +455,8 @@ export default function AdminReportsPage() {
                   <section className="rounded-2xl border border-slate-200 p-4">
                     <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Notes & activity</h3>
                     <div className="mt-3 space-y-2">
-                      {selectedOrder.notes.map((note) => (
-                        <div key={`${note.at}-${note.author}`} className={`rounded-2xl border p-3 text-sm ${noteTone(note.kind)}`}>
+                      {selectedOrder.notes.map((note, index) => (
+                        <div key={`${note.at || "note"}-${note.author || "system"}-${index}`} className={`rounded-2xl border p-3 text-sm ${noteTone(note.kind)}`}>
                           <p className="font-semibold">{note.author}</p>
                           <p className="text-xs opacity-75">{note.at}</p>
                           <p className="mt-1">{note.text}</p>

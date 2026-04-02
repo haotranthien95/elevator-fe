@@ -13,17 +13,12 @@ export const metadata: Metadata = {
 const navItems = [
   { label: "Dashboard", href: "/admin" },
   { label: "Work Orders", href: "/admin/reports" },
+  { label: "Buildings", href: "/admin/buildings" },
+  { label: "Equipment", href: "/admin/equipment" },
   { label: "Admin Login", href: "/admin/login" },
 ];
 
-const upcomingModules = [
-  "Buildings",
-  "Equipment",
-  "Equipment Types",
-  "Technicians",
-  "Schedules",
-  "Checklists",
-];
+const upcomingModules = ["Equipment Types", "Technicians", "Schedules", "Checklists", "Users"];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
@@ -45,7 +40,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             </p>
             <h1 className="mt-2 text-2xl font-semibold">Maintenance Ops Portal</h1>
             <p className="mt-2 text-sm text-slate-300">
-              Phase 1 preview using the captured admin-site baseline and seeded operations data.
+              JWT-secured operations shell backed by the NestJS maintenance-report APIs.
             </p>
           </div>
 
@@ -104,7 +99,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
-                  Preview mode
+                  JWT secured
                 </span>
                 {isAuthenticated ? (
                   <>

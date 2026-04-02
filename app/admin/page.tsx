@@ -1,16 +1,19 @@
 import Link from "next/link";
-import { getDashboardStats, getStatusMeta, moduleCards, technicianLoad, workOrders } from "./data";
+import { getAdminWorkOrdersServer } from "@/lib/admin-server";
+import { getDashboardStats, getStatusMeta, moduleCards, technicianLoad } from "./data";
 
 const quickActions = [
   { label: "Open work orders", href: "/admin/reports" },
-  { label: "Preview login", href: "/admin/login" },
+  { label: "Manage buildings", href: "/admin/buildings" },
+  { label: "Manage equipment", href: "/admin/equipment" },
   { label: "Public form", href: "/" },
 ];
 
-export default function AdminDashboardPage() {
-  const stats = getDashboardStats();
-  const recentOrders = workOrders.slice(0, 5);
-  const attentionOrders = workOrders.filter(
+export default async function AdminDashboardPage() {
+  const allOrders = await getAdminWorkOrdersServer({ limit: 50 });
+  const stats = getDashboardStats(allOrders);
+  const recentOrders = allOrders.slice(0, 5);
+  const attentionOrders = allOrders.filter(
     (item) => item.priority === "Critical" || item.status === "pc-review" || item.status === "comm-review",
   );
 
@@ -20,14 +23,14 @@ export default function AdminDashboardPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-200">
-              Phase 1 deployment
+              Phase 4 rollout
             </p>
             <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">
-              Admin dashboard and ticket review flow are now live.
+              Admin dashboard, ticket actions, and master-data modules are now live.
             </h1>
             <p className="mt-2 text-sm text-emerald-50/90 sm:text-base">
-              This first release brings a working operations shell, review-ready work order list,
-              and a detailed ticket drill-down path at <span className="font-semibold">`/admin`</span>.
+              Operations can now review tickets, update assignments, and maintain the building and
+              equipment portfolio from the protected admin area.
             </p>
           </div>
 
@@ -77,11 +80,11 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="space-y-3">
-            {recentOrders.map((item) => {
+            {recentOrders.map((item, index) => {
               const meta = getStatusMeta(item.status);
               return (
                 <Link
-                  key={item.reportCode}
+                  key={`${item.reportCode || "report"}-${index}`}
                   href={`/admin/reports/${item.reportCode}`}
                   className="block rounded-2xl border border-slate-200 p-4 transition hover:border-emerald-400 hover:bg-emerald-50/40"
                 >
@@ -121,10 +124,10 @@ export default function AdminDashboardPage() {
             <p className="mt-1 text-sm text-slate-500">Prioritized items for dispatch and review teams.</p>
 
             <div className="mt-4 space-y-3">
-              {attentionOrders.slice(0, 4).map((item) => {
+              {attentionOrders.slice(0, 4).map((item, index) => {
                 const meta = getStatusMeta(item.status);
                 return (
-                  <div key={item.reportCode} className="rounded-2xl bg-slate-50 p-3">
+                  <div key={`${item.reportCode || "attention"}-${index}`} className="rounded-2xl bg-slate-50 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-medium text-slate-900">{item.reportCode}</p>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${meta.badgeClass}`}>
