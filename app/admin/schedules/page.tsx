@@ -473,7 +473,7 @@ export default function AdminSchedulesPage() {
               Overdue: {overdueCount}
             </span>
             <Link
-              href="/admin/reports"
+              href="/admin/work-orders"
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >
               Open work orders →
@@ -565,7 +565,7 @@ export default function AdminSchedulesPage() {
                       ) : null}
                       {item.linkedReport?.reportCode ? (
                         <p className="mt-1 text-sm text-emerald-700">
-                          Linked report: <Link href={`/admin/reports/${item.linkedReport.reportCode}`} className="font-semibold hover:underline">{item.linkedReport.reportCode}</Link>
+                          Linked report: <Link href={`/admin/work-orders/${item.linkedReport.reportCode}`} className="font-semibold hover:underline">{item.linkedReport.reportCode}</Link>
                         </p>
                       ) : null}
                     </div>

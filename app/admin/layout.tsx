@@ -10,26 +10,12 @@ import {
 } from "@/lib/admin-auth";
 import { AdminRoleProvider } from "./components/admin-role-provider";
 import { LogoutButton } from "./components/logout-button";
+import { SidebarNav } from "./components/sidebar-nav";
 
 export const metadata: Metadata = {
   title: "Admin Portal | Maintenance Service Report",
   description: "Operations dashboard for maintenance tickets, dispatch, and review flow.",
 };
-
-const navItems = [
-  { label: "Dashboard", href: "/admin" },
-  { label: "Alerts", href: "/admin/alerts" },
-  { label: "Analytics", href: "/admin/analytics" },
-  { label: "Work Orders", href: "/admin/reports" },
-  { label: "Buildings", href: "/admin/buildings" },
-  { label: "Equipment", href: "/admin/equipment" },
-  { label: "Equipment Types", href: "/admin/equipment-types" },
-  { label: "Technicians", href: "/admin/technicians" },
-  { label: "Schedules", href: "/admin/schedules" },
-  { label: "Checklists", href: "/admin/checklists" },
-  { label: "Audit Logs", href: "/admin/audit-logs", roles: ["admin"] },
-  { label: "Users", href: "/admin/users", roles: ["admin"] },
-];
 
 const upcomingModules = ["Automated reminders"];
 
@@ -39,51 +25,32 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const isAuthenticated = hasValidAdminSession(sessionValue);
   const session = decodeAdminSession(sessionValue);
   const currentRole = session?.role ?? "viewer";
-  const visibleNavItems = isAuthenticated
-    ? navItems.filter((item) => !item.roles || item.roles.includes(currentRole))
-    : [
-        { label: "Admin Login", href: "/admin/login" },
-        { label: "Public Form", href: "/" },
-      ];
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
+    <div className="min-h-screen bg-background text-on-surface">
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
-        <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-slate-950 text-slate-100 lg:flex lg:flex-col">
-          <div className="border-b border-slate-800 px-5 py-6">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-300">
+        <aside className="hidden w-72 shrink-0 bg-surface-low lg:flex lg:flex-col">
+          <div className="px-5 py-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-primary">
               YECL Admin
             </p>
-            <h1 className="mt-2 text-2xl font-semibold">Maintenance Ops Portal</h1>
-            <p className="mt-2 text-sm text-slate-300">
-              JWT-secured operations shell backed by the NestJS maintenance-report APIs.
+            <h1 className="mt-2 text-2xl font-semibold text-on-surface tracking-tight">Maintenance Ops</h1>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              Command center backed by the NestJS maintenance-report APIs.
             </p>
           </div>
 
           <nav className="flex-1 px-4 py-5">
-            <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-              Live routes
-            </p>
-            <div className="space-y-2">
-              {visibleNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="block rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm font-medium text-slate-100 transition hover:border-emerald-500 hover:bg-slate-800"
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </div>
+            <SidebarNav isAuthenticated={isAuthenticated} currentRole={currentRole} />
 
-            <p className="mb-2 mt-6 px-2 text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-              Next modules
+            <p className="mb-3 mt-8 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.25em] text-on-surface-variant/70">
+              Extensions
             </p>
-            <div className="space-y-2">
+            <div className="space-y-1">
               {upcomingModules.map((label) => (
                 <div
                   key={label}
-                  className="rounded-xl border border-dashed border-slate-700 px-3 py-2 text-sm text-slate-300"
+                  className="rounded-[12px] bg-surface-lowest/40 px-3 py-2.5 text-[0.875rem] text-on-surface-variant font-medium border border-outline-variant/10 shadow-[0_2px_8px_rgba(24,28,30,0.02)]"
                 >
                   {label}
                 </div>
@@ -91,46 +58,43 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             </div>
           </nav>
 
-          <div className="border-t border-slate-800 px-4 py-4">
+          <div className="px-4 py-6">
             <Link
               href="/"
-              className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+              className="inline-flex w-full items-center justify-center rounded-[12px] bg-gradient-to-b from-primary to-primary-container px-3 py-2.5 text-[0.875rem] font-medium text-white shadow-[0_12px_24px_rgba(0,64,223,0.15)] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(0,64,223,0.25)] hover:from-[#1a55f0] hover:to-[#3b66ff]"
             >
-              Open public form
+              Public Dispatch
             </Link>
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-slate-200 bg-white/90 backdrop-blur">
-            <div className="flex flex-col gap-3 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+        <div className="flex min-w-0 flex-1 flex-col bg-background">
+          <header className="bg-background pt-6 pb-2 sticky top-0 z-20 backdrop-blur-md bg-opacity-90">
+            <div className="flex flex-col gap-3 px-4 sm:px-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-700">
-                  Internal operations
+                <p className="text-[0.6875rem] font-bold uppercase tracking-[0.25em] text-on-surface-variant">
+                  Workspace
                 </p>
-                <h2 className="text-xl font-semibold text-slate-900 sm:text-2xl">
-                  Ticket monitoring, review, and dispatch workspace
+                <h2 className="text-[2.25rem] font-semibold text-on-surface leading-tight tracking-tight mt-1 transition-all">
+                  Ops Dashboard
                 </h2>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="rounded-full bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
-                  JWT secured
-                </span>
+              <div className="flex flex-wrap items-center gap-2 text-sm pb-1">
                 {isAuthenticated ? (
                   <>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+                    <span className="rounded-full bg-surface-high px-3 py-1 text-xs font-semibold tracking-wide text-on-surface">
                       {session?.name ?? session?.email ?? "Signed in"}
                     </span>
-                    <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700">
-                      Role: {formatAdminRole(currentRole)}
+                    <span className="rounded-full bg-surface-high px-3 py-1 text-xs font-semibold tracking-wide text-on-surface">
+                      {formatAdminRole(currentRole)}
                     </span>
                     <LogoutButton />
                   </>
                 ) : (
                   <Link
                     href="/admin/login"
-                    className="rounded-full border border-slate-300 px-3 py-1 font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                    className="rounded-full bg-surface-high px-3 py-1 text-xs font-semibold tracking-wide text-on-surface transition hover:bg-surface-highest"
                   >
                     Login required
                   </Link>
@@ -139,7 +103,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-5 sm:px-6 lg:px-8">
+          <main className="flex-1 px-4 py-8 sm:px-6 lg:px-8">
             <AdminRoleProvider role={currentRole}>{children}</AdminRoleProvider>
           </main>
         </div>

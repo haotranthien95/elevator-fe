@@ -104,7 +104,7 @@ export default async function AdminAlertsPage({
               { label: "Due next 12h", href: buildAlertHref(filters, { dueWithinHours: 12 }) },
               { label: "Due next 24h", href: buildAlertHref(filters, { dueWithinHours: 24 }) },
               { label: "Escalate 72h+", href: buildAlertHref(filters, { escalateAfterHours: 72 }) },
-              { label: "Reports review", href: "/admin/reports?status=pc-review" },
+              { label: "Reports review", href: "/admin/work-orders?status=pc-review" },
             ].map((item) => (
               <Link
                 key={item.href}
@@ -195,7 +195,7 @@ export default async function AdminAlertsPage({
               <h2 className="text-lg font-semibold text-slate-900">Dispatch alerts</h2>
               <p className="text-sm text-slate-500">Unassigned live tickets should be owned before they age further.</p>
             </div>
-            <Link href="/admin/reports" className="text-sm font-semibold text-amber-700 hover:text-amber-900">
+            <Link href="/admin/work-orders" className="text-sm font-semibold text-amber-700 hover:text-amber-900">
               Open work orders →
             </Link>
           </div>
@@ -217,7 +217,7 @@ export default async function AdminAlertsPage({
                   <p className="mt-1 text-sm text-slate-500">Open for {formatHours(item.hoursOpen)} · submitted {formatDateTime(item.submittedAt)}</p>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     {item.reportCode ? (
-                      <Link href={`/admin/reports/${item.reportCode}`} className="text-xs font-semibold text-amber-700 hover:text-amber-900">
+                      <Link href={`/admin/work-orders/${item.reportCode}`} className="text-xs font-semibold text-amber-700 hover:text-amber-900">
                         Open ticket →
                       </Link>
                     ) : (
@@ -286,7 +286,7 @@ export default async function AdminAlertsPage({
               <h2 className="text-lg font-semibold text-slate-900">Stale review queue</h2>
               <p className="text-sm text-slate-500">Submitted and review-stage tickets that have waited too long should be cleared first.</p>
             </div>
-            <Link href="/admin/reports?status=pc-review" className="text-sm font-semibold text-violet-700 hover:text-violet-900">
+            <Link href="/admin/work-orders?status=pc-review" className="text-sm font-semibold text-violet-700 hover:text-violet-900">
               Review queue →
             </Link>
           </div>
@@ -308,7 +308,7 @@ export default async function AdminAlertsPage({
                   <p className="mt-1 text-sm text-slate-500">Waiting {formatHours(item.hoursWaiting)} · updated {formatDateTime(item.updatedAt)}</p>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                     {item.reportCode ? (
-                      <Link href={`/admin/reports/${item.reportCode}`} className="text-xs font-semibold text-violet-700 hover:text-violet-900">
+                      <Link href={`/admin/work-orders/${item.reportCode}`} className="text-xs font-semibold text-violet-700 hover:text-violet-900">
                         Open report →
                       </Link>
                     ) : (

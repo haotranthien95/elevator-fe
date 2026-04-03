@@ -697,7 +697,7 @@ export async function getAdminWorkOrders(filters?: {
     }
 
     const response = await fetch(
-      `${ADMIN_API_BASE_URL}/api/admin/reports${params.toString() ? `?${params.toString()}` : ""}`,
+      `${ADMIN_API_BASE_URL}/api/admin/work-orders${params.toString() ? `?${params.toString()}` : ""}`,
       { cache: "no-store" },
     );
 
@@ -720,7 +720,7 @@ export async function getAdminWorkOrders(filters?: {
 export async function getAdminWorkOrderByCode(reportCode: string) {
   try {
     const response = await fetch(
-      `${ADMIN_API_BASE_URL}/api/admin/reports/${encodeURIComponent(reportCode)}`,
+      `${ADMIN_API_BASE_URL}/api/admin/work-orders/${encodeURIComponent(reportCode)}`,
       { cache: "no-store" },
     );
 
