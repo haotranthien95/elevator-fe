@@ -16,6 +16,22 @@ export type ActivityNote = {
   text: string;
 };
 
+export type ChecklistResultGroup = {
+  category: string;
+  items: Array<{
+    label: string;
+    checked: boolean;
+  }>;
+};
+
+export type ChecklistResults = {
+  equipmentType?: string | null;
+  templateName?: string | null;
+  checkedCount: number;
+  totalCount: number;
+  categories: ChecklistResultGroup[];
+};
+
 export type WorkOrder = {
   reportCode: string;
   building: string;
@@ -34,6 +50,7 @@ export type WorkOrder = {
   rootCause: string | null;
   actionTaken: string | null;
   partsReplaced: string | null;
+  checklistResults?: ChecklistResults | null;
   pcbTests: string[];
   team: string | null;
   engineer: string | null;
@@ -45,12 +62,19 @@ export type AdminReportRecord = {
   status: WorkOrderStatus;
   priority?: Priority;
   assignedTo?: string | null;
+  assignedTechnician?: {
+    id: string;
+    name: string;
+    team?: string | null;
+    specialty?: string | null;
+  } | null;
   maintenanceType?: string | null;
   technicianName?: string | null;
   arrivalDateTime?: string | null;
   submittedAt?: string | null;
   updatedAt?: string | null;
   findings?: string | null;
+  checklistResults?: ChecklistResults | null;
   workPerformed?: string | null;
   partsUsed?: Array<{ name: string; quantity: number }> | null;
   remarks?: string | null;
@@ -444,6 +468,79 @@ export const technicianLoad = [
   { name: "Ko Zaw Min", openJobs: 1, utilization: "61%", team: "Team B" },
 ] as const;
 
+const OPEN_WORK_ORDER_STATUSES: WorkOrderStatus[] = [
+  "pending",
+  "active",
+  "submitted",
+  "pc-review",
+  "comm-review",
+];
+
+const REVIEW_WORK_ORDER_STATUSES: WorkOrderStatus[] = ["pc-review", "comm-review"];
+
+export type TechnicianPerformanceSnapshot = {
+  name: string;
+  team: string;
+  openJobs: number;
+  scheduledVisits: number;
+  completedJobs: number;
+  avgWorkDuration: number | null;
+  avgResponseTime: number | null;
+  utilization: string;
+};
+
+export type BuildingReliabilitySnapshot = {
+  building: string;
+  tickets: number;
+  openTickets: number;
+  criticalTickets: number;
+  reviewBacklog: number;
+  overdueSchedules: number;
+  riskScore: number;
+};
+
+export type WorkloadTrendPoint = {
+  key: string;
+  label: string;
+  opened: number;
+  reviewReady: number;
+  closed: number;
+};
+
+export type StatusBreakdownItem = {
+  status: WorkOrderStatus;
+  label: string;
+  count: number;
+  percentage: number;
+  badgeClass: string;
+};
+
+type AnalyticsScheduleRecord = {
+  status: string;
+  building?: { name?: string | null } | null;
+  assignedTechnician?: { name?: string | null; team?: string | null } | null;
+};
+
+function parseAnalyticsDate(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const directDate = new Date(value);
+  if (!Number.isNaN(directDate.getTime())) {
+    return directDate;
+  }
+
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, day, month, year] = match;
+  const parsedDate = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
 export function getStatusMeta(status: WorkOrderStatus) {
   return statusMeta[status];
 }
@@ -506,7 +603,7 @@ function formatNoteTimestamp(value: string | null | undefined) {
   }).format(date).replace(",", " ·");
 }
 
-function calculateDurationHours(start: string | null | undefined, end: string | null | undefined) {
+function calculateDurationMinutes(start: string | null | undefined, end: string | null | undefined) {
   if (!start || !end) {
     return null;
   }
@@ -517,8 +614,13 @@ function calculateDurationHours(start: string | null | undefined, end: string | 
     return null;
   }
 
-  const diffHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-  return diffHours > 0 ? Math.round(diffHours * 10) / 10 : null;
+  const diffMinutes = (endDate.getTime() - startDate.getTime()) / (1000 * 60);
+  return diffMinutes > 0 ? Math.round(diffMinutes) : null;
+}
+
+function calculateDurationHours(start: string | null | undefined, end: string | null | undefined) {
+  const diffMinutes = calculateDurationMinutes(start, end);
+  return diffMinutes !== null ? Math.round((diffMinutes / 60) * 10) / 10 : null;
 }
 
 function normalizeReportCode(report: AdminReportRecord) {
@@ -549,7 +651,7 @@ export function mapReportToWorkOrder(report: AdminReportRecord): WorkOrder {
     calledPerson: null,
     calledTime: report.submittedAt ?? null,
     issue: report.findings ?? report.remarks ?? report.maintenanceType ?? null,
-    technician: report.assignedTo ?? report.technicianName ?? null,
+    technician: report.assignedTechnician?.name ?? report.assignedTo ?? report.technicianName ?? null,
     date: formatDateLabel(report.submittedAt ?? report.arrivalDateTime),
     arrivalTime: formatTimeLabel(report.arrivalDateTime),
     completionTime:
@@ -559,7 +661,7 @@ export function mapReportToWorkOrder(report: AdminReportRecord): WorkOrder {
       report.status === "invoice-ready"
         ? formatTimeLabel(report.updatedAt)
         : null,
-    responseTimeMinutes: null,
+    responseTimeMinutes: calculateDurationMinutes(report.submittedAt, report.arrivalDateTime),
     workDurationHours: calculateDurationHours(report.arrivalDateTime, report.updatedAt),
     rootCause: report.findings ?? null,
     actionTaken: report.workPerformed ?? report.maintenanceType ?? null,
@@ -567,6 +669,7 @@ export function mapReportToWorkOrder(report: AdminReportRecord): WorkOrder {
       report.partsUsed?.length
         ? report.partsUsed.map((part) => `${part.name} (${part.quantity})`).join(", ")
         : null,
+    checklistResults: report.checklistResults ?? null,
     pcbTests: [],
     team: null,
     engineer: null,
@@ -641,7 +744,259 @@ export async function getAdminWorkOrderByCode(reportCode: string) {
   }
 }
 
-export function getDashboardStats(source: WorkOrder[] = workOrders) {
+export function getStatusBreakdown(source: WorkOrder[] = workOrders): StatusBreakdownItem[] {
+  const total = source.length || 1;
+
+  return statusFilters
+    .filter((item) => item.value !== "all")
+    .map((item) => {
+      const status = item.value as WorkOrderStatus;
+      const count = source.filter((order) => order.status === status).length;
+
+      return {
+        status,
+        label: item.label,
+        count,
+        percentage: Math.round((count / total) * 100),
+        badgeClass: getStatusMeta(status).badgeClass,
+      };
+    })
+    .filter((item) => item.count > 0 || source.length === 0)
+    .sort((left, right) => right.count - left.count);
+}
+
+export function getTechnicianPerformanceSnapshot(
+  source: WorkOrder[] = workOrders,
+  schedules: AnalyticsScheduleRecord[] = [],
+): TechnicianPerformanceSnapshot[] {
+  const map = new Map<
+    string,
+    {
+      name: string;
+      team: string;
+      openJobs: number;
+      scheduledVisits: number;
+      completedJobs: number;
+      totalDuration: number;
+      durationSamples: number;
+      totalResponse: number;
+      responseSamples: number;
+    }
+  >();
+
+  const ensureSummary = (name: string, team?: string | null) => {
+    const existing = map.get(name);
+    if (existing) {
+      if (!existing.team && team?.trim()) {
+        existing.team = team.trim();
+      }
+      return existing;
+    }
+
+    const created = {
+      name,
+      team: team?.trim() || "Field operations",
+      openJobs: 0,
+      scheduledVisits: 0,
+      completedJobs: 0,
+      totalDuration: 0,
+      durationSamples: 0,
+      totalResponse: 0,
+      responseSamples: 0,
+    };
+    map.set(name, created);
+    return created;
+  };
+
+  for (const order of source) {
+    const name = order.technician?.trim();
+    if (!name) {
+      continue;
+    }
+
+    const summary = ensureSummary(name, order.team);
+    if (OPEN_WORK_ORDER_STATUSES.includes(order.status)) {
+      summary.openJobs += 1;
+    } else {
+      summary.completedJobs += 1;
+    }
+
+    if (typeof order.workDurationHours === "number") {
+      summary.totalDuration += order.workDurationHours;
+      summary.durationSamples += 1;
+    }
+
+    if (typeof order.responseTimeMinutes === "number") {
+      summary.totalResponse += order.responseTimeMinutes;
+      summary.responseSamples += 1;
+    }
+  }
+
+  for (const schedule of schedules) {
+    const name = schedule.assignedTechnician?.name?.trim();
+    if (!name) {
+      continue;
+    }
+
+    const summary = ensureSummary(name, schedule.assignedTechnician?.team);
+    if (["scheduled", "overdue", "active"].includes(schedule.status)) {
+      summary.scheduledVisits += 1;
+    }
+  }
+
+  return Array.from(map.values())
+    .map((item) => {
+      const avgWorkDuration = item.durationSamples
+        ? Math.round((item.totalDuration / item.durationSamples) * 10) / 10
+        : null;
+      const avgResponseTime = item.responseSamples
+        ? Math.round(item.totalResponse / item.responseSamples)
+        : null;
+      const workloadScore = item.openJobs * 14 + item.scheduledVisits * 9 + item.completedJobs * 5;
+
+      return {
+        name: item.name,
+        team: item.team,
+        openJobs: item.openJobs,
+        scheduledVisits: item.scheduledVisits,
+        completedJobs: item.completedJobs,
+        avgWorkDuration,
+        avgResponseTime,
+        utilization: `${Math.min(98, Math.max(36, 30 + workloadScore))}%`,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.openJobs + right.scheduledVisits * 2 + right.completedJobs -
+        (left.openJobs + left.scheduledVisits * 2 + left.completedJobs),
+    );
+}
+
+export function getBuildingReliabilitySummary(
+  source: WorkOrder[] = workOrders,
+  schedules: AnalyticsScheduleRecord[] = [],
+): BuildingReliabilitySnapshot[] {
+  const map = new Map<
+    string,
+    {
+      building: string;
+      tickets: number;
+      openTickets: number;
+      criticalTickets: number;
+      reviewBacklog: number;
+      overdueSchedules: number;
+    }
+  >();
+
+  const ensureSummary = (building: string) => {
+    const key = building.trim() || "Unknown building";
+    const existing = map.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const created = {
+      building: key,
+      tickets: 0,
+      openTickets: 0,
+      criticalTickets: 0,
+      reviewBacklog: 0,
+      overdueSchedules: 0,
+    };
+    map.set(key, created);
+    return created;
+  };
+
+  for (const order of source) {
+    const summary = ensureSummary(order.building);
+    summary.tickets += 1;
+
+    if (OPEN_WORK_ORDER_STATUSES.includes(order.status)) {
+      summary.openTickets += 1;
+    }
+
+    if (REVIEW_WORK_ORDER_STATUSES.includes(order.status)) {
+      summary.reviewBacklog += 1;
+    }
+
+    if (order.priority === "Critical") {
+      summary.criticalTickets += 1;
+    }
+  }
+
+  for (const schedule of schedules) {
+    const summary = ensureSummary(schedule.building?.name ?? "Unknown building");
+    if (schedule.status === "overdue") {
+      summary.overdueSchedules += 1;
+    }
+  }
+
+  return Array.from(map.values())
+    .map((item) => ({
+      ...item,
+      riskScore:
+        item.openTickets * 3 +
+        item.criticalTickets * 4 +
+        item.reviewBacklog * 2 +
+        item.overdueSchedules * 5,
+    }))
+    .sort((left, right) => right.riskScore - left.riskScore || right.tickets - left.tickets);
+}
+
+export function getWorkloadTrend(source: WorkOrder[] = workOrders): WorkloadTrendPoint[] {
+  const grouped = new Map<
+    string,
+    {
+      key: string;
+      date: Date;
+      opened: number;
+      reviewReady: number;
+      closed: number;
+    }
+  >();
+
+  for (const order of source) {
+    const date = parseAnalyticsDate(order.calledTime ?? order.date);
+    if (!date) {
+      continue;
+    }
+
+    const key = date.toISOString().slice(0, 10);
+    const current = grouped.get(key) ?? {
+      key,
+      date,
+      opened: 0,
+      reviewReady: 0,
+      closed: 0,
+    };
+
+    current.opened += 1;
+    if (REVIEW_WORK_ORDER_STATUSES.includes(order.status)) {
+      current.reviewReady += 1;
+    }
+    if (order.status === "invoice-ready") {
+      current.closed += 1;
+    }
+
+    grouped.set(key, current);
+  }
+
+  return Array.from(grouped.values())
+    .sort((left, right) => left.date.getTime() - right.date.getTime())
+    .slice(-6)
+    .map((item) => ({
+      key: item.key,
+      label: new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" }).format(item.date),
+      opened: item.opened,
+      reviewReady: item.reviewReady,
+      closed: item.closed,
+    }));
+}
+
+export function getDashboardStats(
+  source: WorkOrder[] = workOrders,
+  schedules: Array<{ status: string }> = [],
+) {
   const responseTimes = source
     .map((item) => item.responseTimeMinutes)
     .filter((value): value is number => value !== null);
@@ -650,21 +1005,21 @@ export function getDashboardStats(source: WorkOrder[] = workOrders) {
     .map((item) => item.workDurationHours)
     .filter((value): value is number => value !== null);
 
-  const openStatuses: WorkOrderStatus[] = [
-    "pending",
-    "active",
-    "submitted",
-    "pc-review",
-    "comm-review",
-  ];
+  const scheduleSource = schedules.length > 0 ? schedules : source;
 
   return {
-    myQueue: source.filter((item) => openStatuses.includes(item.status)).length,
+    myQueue: source.filter((item) => OPEN_WORK_ORDER_STATUSES.includes(item.status)).length,
     activeJobs: source.filter((item) => item.status === "active").length,
-    pendingReview: source.filter(
-      (item) => item.status === "pc-review" || item.status === "comm-review",
+    pendingReview: source.filter((item) => REVIEW_WORK_ORDER_STATUSES.includes(item.status)).length,
+    criticalQueue: source.filter(
+      (item) => item.priority === "Critical" && OPEN_WORK_ORDER_STATUSES.includes(item.status),
     ).length,
-    scheduled: source.filter((item) => item.status === "scheduled").length,
+    needsDispatch: source.filter(
+      (item) => !item.technician?.trim() && OPEN_WORK_ORDER_STATUSES.includes(item.status),
+    ).length,
+    invoiceReady: source.filter((item) => item.status === "invoice-ready").length,
+    scheduled: scheduleSource.filter((item) => item.status === "scheduled").length,
+    overdue: scheduleSource.filter((item) => item.status === "overdue").length,
     avgResponseTime: responseTimes.length
       ? Math.round(responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length)
       : 0,

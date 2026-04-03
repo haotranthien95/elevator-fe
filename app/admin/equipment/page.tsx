@@ -2,15 +2,25 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { AccessNotice, useAdminPermissions } from "../components/admin-role-provider";
 
 type BuildingOption = {
   id: string;
   name: string;
 };
 
+type EquipmentTypeOption = {
+  id: string;
+  name: string;
+  code: string | null;
+  category: string | null;
+  isActive: boolean;
+};
+
 type EquipmentRecord = {
   id: string;
   equipmentType: string;
+  equipmentTypeInfo?: EquipmentTypeOption | null;
   equipmentCode: string;
   serialNumber: string | null;
   brand: string | null;
@@ -22,7 +32,8 @@ type EquipmentRecord = {
 
 const initialForm = {
   buildingId: "",
-  equipmentType: "Elevator",
+  equipmentTypeId: "",
+  equipmentType: "",
   equipmentCode: "",
   serialNumber: "",
   brand: "",
@@ -32,8 +43,10 @@ const initialForm = {
 };
 
 export default function AdminEquipmentPage() {
+  const { isAdmin } = useAdminPermissions();
   const [equipment, setEquipment] = useState<EquipmentRecord[]>([]);
   const [buildings, setBuildings] = useState<BuildingOption[]>([]);
+  const [typeOptions, setTypeOptions] = useState<EquipmentTypeOption[]>([]);
   const [search, setSearch] = useState("");
   const [buildingId, setBuildingId] = useState("");
   const [equipmentType, setEquipmentType] = useState("");
@@ -53,6 +66,27 @@ export default function AdminEquipmentPage() {
     setForm((current) => ({
       ...current,
       buildingId: current.buildingId || payload?.data?.[0]?.id || "",
+    }));
+  };
+
+  const loadEquipmentTypes = async () => {
+    const response = await fetch("/api/admin/equipment-types", { cache: "no-store" });
+    const payload = (await response.json().catch(() => null)) as
+      | { data?: Array<EquipmentTypeOption> }
+      | null;
+
+    const nextTypes = payload?.data ?? [];
+    const defaultType =
+      nextTypes.find((item) => item.id === form.equipmentTypeId) ??
+      nextTypes.find((item) => item.name === form.equipmentType) ??
+      nextTypes.find((item) => item.isActive) ??
+      nextTypes[0];
+
+    setTypeOptions(nextTypes);
+    setForm((current) => ({
+      ...current,
+      equipmentTypeId: current.equipmentTypeId || defaultType?.id || "",
+      equipmentType: current.equipmentType || defaultType?.name || "",
     }));
   };
 
@@ -93,23 +127,34 @@ export default function AdminEquipmentPage() {
   };
 
   useEffect(() => {
-    void loadBuildings();
+    void Promise.all([loadBuildings(), loadEquipmentTypes()]);
   }, []);
 
   useEffect(() => {
     void loadEquipment();
   }, [search, buildingId, equipmentType]);
 
-  const equipmentTypes = useMemo(
-    () => Array.from(new Set(equipment.map((item) => item.equipmentType))).sort(),
-    [equipment],
-  );
+  const equipmentTypes = useMemo(() => {
+    const managedTypes = typeOptions
+      .filter((item) => item.isActive)
+      .map((item) => item.name);
+
+    if (managedTypes.length > 0) {
+      return managedTypes;
+    }
+
+    return Array.from(new Set(equipment.map((item) => item.equipmentType))).sort();
+  }, [equipment, typeOptions]);
 
   const resetForm = () => {
     setEditingId(null);
+    const defaultType = typeOptions.find((item) => item.isActive) ?? typeOptions[0];
+
     setForm((current) => ({
       ...initialForm,
       buildingId: buildings[0]?.id ?? current.buildingId,
+      equipmentTypeId: defaultType?.id ?? current.equipmentTypeId,
+      equipmentType: defaultType?.name ?? current.equipmentType,
     }));
   };
 
@@ -168,6 +213,12 @@ export default function AdminEquipmentPage() {
               Open buildings →
             </Link>
             <Link
+              href="/admin/equipment-types"
+              className="rounded-xl border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+            >
+              Equipment types →
+            </Link>
+            <Link
               href="/admin"
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >
@@ -187,6 +238,10 @@ export default function AdminEquipmentPage() {
         >
           {feedback.message}
         </div>
+      ) : null}
+
+      {!isAdmin ? (
+        <AccessNotice message="Equipment records remain visible, but only admin users can create or edit them." />
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
@@ -259,25 +314,37 @@ export default function AdminEquipmentPage() {
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingId(item.id);
-                        setForm({
-                          buildingId: item.building?.id ?? buildings[0]?.id ?? "",
-                          equipmentType: item.equipmentType,
-                          equipmentCode: item.equipmentCode,
-                          serialNumber: item.serialNumber ?? "",
-                          brand: item.brand ?? "",
-                          model: item.model ?? "",
-                          location: item.location ?? "",
-                          isActive: item.isActive,
-                        });
-                      }}
-                      className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-                    >
-                      Edit equipment
-                    </button>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(item.id);
+                          const matchedType =
+                            item.equipmentTypeInfo ??
+                            typeOptions.find((type) => type.name === item.equipmentType) ??
+                            null;
+
+                          setForm({
+                            buildingId: item.building?.id ?? buildings[0]?.id ?? "",
+                            equipmentTypeId: matchedType?.id ?? "",
+                            equipmentType: matchedType?.name ?? item.equipmentType,
+                            equipmentCode: item.equipmentCode,
+                            serialNumber: item.serialNumber ?? "",
+                            brand: item.brand ?? "",
+                            model: item.model ?? "",
+                            location: item.location ?? "",
+                            isActive: item.isActive,
+                          });
+                        }}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                      >
+                        Edit equipment
+                      </button>
+                    ) : (
+                      <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                        Read-only
+                      </span>
+                    )}
                   </div>
                 </article>
               ))
@@ -293,6 +360,11 @@ export default function AdminEquipmentPage() {
             Register new assets and keep building-specific details current.
           </p>
 
+          {!isAdmin ? (
+            <div className="mt-4">
+              <AccessNotice message="Equipment data can only be created or edited by admin users." />
+            </div>
+          ) : (
           <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
             <select
               value={form.buildingId}
@@ -309,13 +381,28 @@ export default function AdminEquipmentPage() {
             </select>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                value={form.equipmentType}
-                onChange={(event) => setForm((current) => ({ ...current, equipmentType: event.target.value }))}
-                placeholder="Equipment type"
+              <select
+                value={form.equipmentTypeId}
+                onChange={(event) => {
+                  const selectedType = typeOptions.find((item) => item.id === event.target.value);
+                  setForm((current) => ({
+                    ...current,
+                    equipmentTypeId: event.target.value,
+                    equipmentType: selectedType?.name ?? "",
+                  }));
+                }}
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
                 required
-              />
+              >
+                <option value="">Select equipment type</option>
+                {typeOptions
+                  .filter((item) => item.isActive)
+                  .map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name}
+                    </option>
+                  ))}
+              </select>
               <input
                 value={form.equipmentCode}
                 onChange={(event) => setForm((current) => ({ ...current, equipmentCode: event.target.value }))}
@@ -383,6 +470,7 @@ export default function AdminEquipmentPage() {
               ) : null}
             </div>
           </form>
+          )}
         </section>
       </div>
     </div>

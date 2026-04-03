@@ -2,7 +2,13 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { ADMIN_SESSION_COOKIE, hasValidAdminSession } from "@/lib/admin-auth";
+import {
+  ADMIN_SESSION_COOKIE,
+  decodeAdminSession,
+  formatAdminRole,
+  hasValidAdminSession,
+} from "@/lib/admin-auth";
+import { AdminRoleProvider } from "./components/admin-role-provider";
 import { LogoutButton } from "./components/logout-button";
 
 export const metadata: Metadata = {
@@ -12,19 +18,29 @@ export const metadata: Metadata = {
 
 const navItems = [
   { label: "Dashboard", href: "/admin" },
+  { label: "Alerts", href: "/admin/alerts" },
+  { label: "Analytics", href: "/admin/analytics" },
   { label: "Work Orders", href: "/admin/reports" },
   { label: "Buildings", href: "/admin/buildings" },
   { label: "Equipment", href: "/admin/equipment" },
-  { label: "Admin Login", href: "/admin/login" },
+  { label: "Equipment Types", href: "/admin/equipment-types" },
+  { label: "Technicians", href: "/admin/technicians" },
+  { label: "Schedules", href: "/admin/schedules" },
+  { label: "Checklists", href: "/admin/checklists" },
+  { label: "Audit Logs", href: "/admin/audit-logs", roles: ["admin"] },
+  { label: "Users", href: "/admin/users", roles: ["admin"] },
 ];
 
-const upcomingModules = ["Equipment Types", "Technicians", "Schedules", "Checklists", "Users"];
+const upcomingModules = ["Automated reminders"];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
-  const isAuthenticated = hasValidAdminSession(cookieStore.get(ADMIN_SESSION_COOKIE)?.value);
+  const sessionValue = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
+  const isAuthenticated = hasValidAdminSession(sessionValue);
+  const session = decodeAdminSession(sessionValue);
+  const currentRole = session?.role ?? "viewer";
   const visibleNavItems = isAuthenticated
-    ? navItems
+    ? navItems.filter((item) => !item.roles || item.roles.includes(currentRole))
     : [
         { label: "Admin Login", href: "/admin/login" },
         { label: "Public Form", href: "/" },
@@ -104,7 +120,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
                 {isAuthenticated ? (
                   <>
                     <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
-                      Role: Operations Team
+                      {session?.name ?? session?.email ?? "Signed in"}
+                    </span>
+                    <span className="rounded-full bg-sky-50 px-3 py-1 font-medium text-sky-700">
+                      Role: {formatAdminRole(currentRole)}
                     </span>
                     <LogoutButton />
                   </>
@@ -120,7 +139,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-5 sm:px-6 lg:px-8">{children}</main>
+          <main className="flex-1 px-4 py-5 sm:px-6 lg:px-8">
+            <AdminRoleProvider role={currentRole}>{children}</AdminRoleProvider>
+          </main>
         </div>
       </div>
     </div>

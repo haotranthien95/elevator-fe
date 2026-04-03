@@ -105,12 +105,24 @@ const checklistByType: Record<string, ChecklistGroup[]> = {
 const MAX_PHOTO_COUNT = 5;
 const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
 
+const getLocalDateTimeParts = (date = new Date()) => {
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  const localDate = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const localTime = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+  return {
+    date: localDate,
+    time: localTime,
+    dateTime: `${localDate}T${localTime}`,
+  };
+};
+
 const createInitialFormData = () => ({
   buildingId: "",
   equipmentType: "",
   equipmentId: "",
   maintenanceType: "Scheduled/Preventive Maintenance",
-  arrivalDateTime: new Date().toISOString().slice(0, 16),
+  arrivalDateTime: getLocalDateTimeParts().dateTime,
   technicianName: "Ko Aung Mya Oo",
   checklistState: {} as Record<string, boolean>,
   issuesFound: "",
@@ -149,6 +161,10 @@ export default function Home() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [equipmentTypes, setEquipmentTypes] = useState<string[]>([]);
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
+  const [dynamicChecklist, setDynamicChecklist] = useState<ChecklistGroup[] | null>(null);
+  const [dynamicChecklistType, setDynamicChecklistType] = useState("");
+  const [dynamicChecklistName, setDynamicChecklistName] = useState<string | null>(null);
+  const [isChecklistLoading, setIsChecklistLoading] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successReportCode, setSuccessReportCode] = useState<string | null>(null);
@@ -168,7 +184,64 @@ export default function Home() {
   const completionTime = formData.completionTime;
 
   const selectedChecklist =
-    checklistByType[formData.equipmentType] ?? checklistByType.default;
+    dynamicChecklist && dynamicChecklistType === formData.equipmentType
+      ? dynamicChecklist
+      : checklistByType[formData.equipmentType] ?? checklistByType.default;
+
+  useEffect(() => {
+    if (!formData.equipmentType) {
+      setDynamicChecklist(null);
+      setDynamicChecklistType("");
+      setDynamicChecklistName(null);
+      setIsChecklistLoading(false);
+      return;
+    }
+
+    setDynamicChecklist(null);
+    setDynamicChecklistType("");
+    setDynamicChecklistName(null);
+    let isActive = true;
+
+    const loadChecklistTemplate = async () => {
+      setIsChecklistLoading(true);
+      try {
+        const query = new URLSearchParams({ equipmentType: formData.equipmentType });
+        const response = await fetch(`${API_BASE_URL}/checklists/template?${query.toString()}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | { data?: { name?: string | null; categories?: ChecklistGroup[] | null } | null }
+          | null;
+
+        if (!isActive) {
+          return;
+        }
+
+        const template = payload?.data;
+        const categories = template?.categories;
+        const hasCategories = Array.isArray(categories) && categories.length > 0;
+        setDynamicChecklist(hasCategories ? categories : null);
+        setDynamicChecklistType(hasCategories ? formData.equipmentType : "");
+        setDynamicChecklistName(hasCategories ? (template?.name ?? null) : null);
+      } catch {
+        if (isActive) {
+          setDynamicChecklist(null);
+          setDynamicChecklistType("");
+          setDynamicChecklistName(null);
+        }
+      } finally {
+        if (isActive) {
+          setIsChecklistLoading(false);
+        }
+      }
+    };
+
+    void loadChecklistTemplate();
+
+    return () => {
+      isActive = false;
+    };
+  }, [formData.equipmentType]);
 
   useEffect(() => {
     const nextChecklist: Record<string, boolean> = {};
@@ -184,7 +257,7 @@ export default function Home() {
       checklistState: nextChecklist,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.equipmentType]);
+  }, [formData.equipmentType, dynamicChecklist]);
 
   useEffect(() => {
     const initLookups = async () => {
@@ -280,7 +353,8 @@ export default function Home() {
       updateField("arrivalDateTime", "");
       return;
     }
-    const normalizedDate = date || new Date().toISOString().slice(0, 10);
+    const now = getLocalDateTimeParts();
+    const normalizedDate = date || now.date;
     const normalizedTime = time || "00:00";
     updateField("arrivalDateTime", `${normalizedDate}T${normalizedTime}`);
   };
@@ -400,17 +474,36 @@ export default function Home() {
     return { canvas, context };
   };
 
-  const initTechCanvas = () => {
+  const initializeSignatureCanvas = (
+    canvas: HTMLCanvasElement,
+    context: CanvasRenderingContext2D,
+    signatureDataUrl?: string,
+  ) => {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "#111827";
+    context.lineWidth = 2;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    if (!signatureDataUrl) {
+      return;
+    }
+
+    const image = new Image();
+    image.onload = () => {
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    };
+    image.src = signatureDataUrl;
+  };
+
+  const initTechCanvas = (signatureDataUrl = formData.techSignature) => {
     const drawing = getTechCanvasContext();
     if (!drawing) {
       return;
     }
-    drawing.context.fillStyle = "#ffffff";
-    drawing.context.fillRect(0, 0, drawing.canvas.width, drawing.canvas.height);
-    drawing.context.strokeStyle = "#111827";
-    drawing.context.lineWidth = 2;
-    drawing.context.lineCap = "round";
-    drawing.context.lineJoin = "round";
+    initializeSignatureCanvas(drawing.canvas, drawing.context, signatureDataUrl);
   };
 
   const getCustomerCanvasContext = () => {
@@ -425,24 +518,27 @@ export default function Home() {
     return { canvas, context };
   };
 
-  const initCustomerCanvas = () => {
+  const initCustomerCanvas = (signatureDataUrl = formData.customerSignature) => {
     const drawing = getCustomerCanvasContext();
     if (!drawing) {
       return;
     }
-    drawing.context.fillStyle = "#ffffff";
-    drawing.context.fillRect(0, 0, drawing.canvas.width, drawing.canvas.height);
-    drawing.context.strokeStyle = "#111827";
-    drawing.context.lineWidth = 2;
-    drawing.context.lineCap = "round";
-    drawing.context.lineJoin = "round";
+    initializeSignatureCanvas(drawing.canvas, drawing.context, signatureDataUrl);
   };
 
   useEffect(() => {
-    initTechCanvas();
-    initCustomerCanvas();
+    if (step !== 5) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      initTechCanvas();
+      initCustomerCanvas();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [step, formData.techSignature, formData.customerSignature]);
 
   const getCanvasPoint = (
     event: PointerEvent<HTMLCanvasElement>,
@@ -506,7 +602,7 @@ export default function Home() {
       techSignature: "",
       techSignatureLocked: false,
     }));
-    initTechCanvas();
+    initTechCanvas("");
   };
 
   const markTechSignature = () => {
@@ -576,7 +672,7 @@ export default function Home() {
       customerSignature: "",
       customerSignatureLocked: false,
     }));
-    initCustomerCanvas();
+    initCustomerCanvas("");
   };
 
   const markCustomerSignature = () => {
@@ -629,12 +725,30 @@ export default function Home() {
         formData.customerMessage ? `Customer message: ${formData.customerMessage}` : "",
       ].filter(Boolean);
 
+      const checklistResults = {
+        equipmentType: formData.equipmentType,
+        templateName:
+          dynamicChecklist && dynamicChecklistType === formData.equipmentType
+            ? dynamicChecklistName
+            : null,
+        checkedCount,
+        totalCount,
+        categories: selectedChecklist.map((group, groupIndex) => ({
+          category: group.category,
+          items: group.items.map((item, itemIndex) => ({
+            label: item,
+            checked: Boolean(formData.checklistState[`${groupIndex}-${itemIndex}`]),
+          })),
+        })),
+      };
+
       const payload = {
         buildingId: formData.buildingId,
         equipmentId: formData.equipmentId,
         maintenanceType: formData.maintenanceType,
         arrivalDateTime: new Date(formData.arrivalDateTime).toISOString(),
         technicianName: formData.technicianName,
+        checklistResults,
         findings: `${checkedCount}/${totalCount} checklist items checked`,
         workPerformed: formData.partsReplaced === "yes" ? "Parts replaced" : "Routine service",
         partsUsed:
@@ -825,7 +939,10 @@ export default function Home() {
                   <button
                     className="rounded-full bg-[#f59e0b] px-4 py-1.5 text-sm font-bold text-white"
                     type="button"
-                    onClick={() => updateField("arrivalDateTime", new Date().toISOString().slice(0, 16))}
+                    onClick={() => {
+                      const now = getLocalDateTimeParts();
+                      updateArrival(now.date, now.time);
+                    }}
                   >
                     Now
                   </button>
@@ -873,6 +990,18 @@ export default function Home() {
               {!formData.equipmentType && (
                 <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-sm text-amber-700">
                   Please select equipment type in Basic Information.
+                </div>
+              )}
+
+              {formData.equipmentType && isChecklistLoading && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                  Loading the latest checklist template for {formData.equipmentType}...
+                </div>
+              )}
+
+              {formData.equipmentType && dynamicChecklist && !isChecklistLoading && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-sky-700">
+                  Using the checklist template configured in the admin portal for this equipment type.
                 </div>
               )}
 
@@ -1083,11 +1212,8 @@ export default function Home() {
                     className="rounded-full bg-[#f59e0b] px-4 py-1.5 text-sm font-bold text-white"
                     type="button"
                     onClick={() => {
-                      const now = new Date();
-                      updateCompletion(
-                        now.toISOString().slice(0, 10),
-                        now.toTimeString().slice(0, 5),
-                      );
+                      const now = getLocalDateTimeParts();
+                      updateCompletion(now.date, now.time);
                     }}
                   >
                     Now
@@ -1154,9 +1280,9 @@ export default function Home() {
                   <p className="mb-2 text-xs font-medium text-red-600">{stepErrors.techSignature}</p>
                 )}
                 <div
-                  className={`rounded-lg border-2 border-dashed p-2 ${
+                  className={`relative rounded-lg border-2 border-dashed p-2 transition-all ${
                     stepErrors.techSignature ? "border-red-400 bg-red-50" : "border-slate-300 bg-white"
-                  }`}
+                  } ${formData.techSignatureLocked ? "ring-2 ring-emerald-200 shadow-inner" : ""}`}
                 >
                   <canvas
                     ref={techCanvasRef}
@@ -1164,12 +1290,22 @@ export default function Home() {
                     height={180}
                     className={`h-36 w-full touch-none rounded-md ${
                       stepErrors.techSignature ? "bg-red-50" : "bg-white"
-                    } ${formData.techSignatureLocked ? "cursor-not-allowed opacity-70" : ""}`}
+                    } ${formData.techSignatureLocked ? "pointer-events-none cursor-not-allowed opacity-70" : ""}`}
                     onPointerDown={startTechDrawing}
                     onPointerMove={moveTechDrawing}
                     onPointerUp={endTechDrawing}
                     onPointerLeave={endTechDrawing}
                   />
+                  {formData.techSignatureLocked && (
+                    <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-md bg-slate-900/10 backdrop-blur-[1px]">
+                      <div className="rounded-full border border-emerald-200 bg-white/95 px-4 py-2 text-center shadow-sm">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
+                          Signed & Locked
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-600">Clear / Sign Again to unlock</p>
+                      </div>
+                    </div>
+                  )}
                   {!formData.techSignature && !formData.techSignatureLocked && (
                     <p className="mt-2 text-center text-xs text-slate-500">
                       Sign here: press and drag to draw your signature
@@ -1177,17 +1313,18 @@ export default function Home() {
                   )}
                   {formData.techSignatureLocked && (
                     <p className="mt-2 text-center text-xs font-semibold text-emerald-700">
-                      Signature locked. Click Clear / Sign Again to edit.
+                      Signature locked successfully.
                     </p>
                   )}
                 </div>
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white"
+                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
                     onClick={markTechSignature}
+                    disabled={formData.techSignatureLocked || !formData.techSignature}
                   >
-                    Mark as Signed
+                    {formData.techSignatureLocked ? "Signed" : "Mark as Signed"}
                   </button>
                   <button
                     type="button"
@@ -1209,9 +1346,9 @@ export default function Home() {
                   <p className="mb-2 text-xs font-medium text-red-600">{stepErrors.customerSignature}</p>
                 )}
                 <div
-                  className={`rounded-lg border-2 border-dashed p-2 ${
+                  className={`relative rounded-lg border-2 border-dashed p-2 transition-all ${
                     stepErrors.customerSignature ? "border-red-400 bg-red-50" : "border-slate-300 bg-white"
-                  }`}
+                  } ${formData.customerSignatureLocked ? "ring-2 ring-emerald-200 shadow-inner" : ""}`}
                 >
                   <canvas
                     ref={customerCanvasRef}
@@ -1219,12 +1356,22 @@ export default function Home() {
                     height={180}
                     className={`h-36 w-full touch-none rounded-md ${
                       stepErrors.customerSignature ? "bg-red-50" : "bg-white"
-                    } ${formData.customerSignatureLocked ? "cursor-not-allowed opacity-70" : ""}`}
+                    } ${formData.customerSignatureLocked ? "pointer-events-none cursor-not-allowed opacity-70" : ""}`}
                     onPointerDown={startCustomerDrawing}
                     onPointerMove={moveCustomerDrawing}
                     onPointerUp={endCustomerDrawing}
                     onPointerLeave={endCustomerDrawing}
                   />
+                  {formData.customerSignatureLocked && (
+                    <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-md bg-slate-900/10 backdrop-blur-[1px]">
+                      <div className="rounded-full border border-emerald-200 bg-white/95 px-4 py-2 text-center shadow-sm">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">
+                          Signed & Locked
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-600">Clear / Sign Again to unlock</p>
+                      </div>
+                    </div>
+                  )}
                   {!formData.customerSignature && !formData.customerSignatureLocked && (
                     <p className="mt-2 text-center text-xs text-slate-500">
                       Sign here: press and drag to draw your signature
@@ -1232,17 +1379,18 @@ export default function Home() {
                   )}
                   {formData.customerSignatureLocked && (
                     <p className="mt-2 text-center text-xs font-semibold text-emerald-700">
-                      Signature locked. Click Clear / Sign Again to edit.
+                      Signature locked successfully.
                     </p>
                   )}
                 </div>
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white"
+                    className="h-10 rounded-lg bg-[#1b3c7b] px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
                     onClick={markCustomerSignature}
+                    disabled={formData.customerSignatureLocked || !formData.customerSignature}
                   >
-                    Mark as Signed
+                    {formData.customerSignatureLocked ? "Signed" : "Mark as Signed"}
                   </button>
                   <button
                     type="button"

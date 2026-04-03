@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { AccessNotice, useAdminPermissions } from "../components/admin-role-provider";
 
 type BuildingRecord = {
   id: string;
@@ -24,6 +25,7 @@ const initialForm = {
 };
 
 export default function AdminBuildingsPage() {
+  const { isAdmin } = useAdminPermissions();
   const [buildings, setBuildings] = useState<BuildingRecord[]>([]);
   const [query, setQuery] = useState("");
   const [form, setForm] = useState(initialForm);
@@ -171,6 +173,10 @@ export default function AdminBuildingsPage() {
         </div>
       ) : null}
 
+      {!isAdmin ? (
+        <AccessNotice message="Building records remain visible, but only admin users can create or edit them." />
+      ) : null}
+
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -225,23 +231,29 @@ export default function AdminBuildingsPage() {
                         <span className="font-medium text-slate-900">Equipment:</span>{" "}
                         {building.equipment?.length ?? 0}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingId(building.id);
-                          setForm({
-                            name: building.name,
-                            code: building.code ?? "",
-                            address: building.address ?? "",
-                            contactName: building.contactName ?? "",
-                            contactPhone: building.contactPhone ?? "",
-                            isActive: building.isActive,
-                          });
-                        }}
-                        className="mt-2 rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-                      >
-                        Edit building
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingId(building.id);
+                            setForm({
+                              name: building.name,
+                              code: building.code ?? "",
+                              address: building.address ?? "",
+                              contactName: building.contactName ?? "",
+                              contactPhone: building.contactPhone ?? "",
+                              isActive: building.isActive,
+                            });
+                          }}
+                          className="mt-2 rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+                        >
+                          Edit building
+                        </button>
+                      ) : (
+                        <span className="mt-2 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                          Read-only
+                        </span>
+                      )}
                     </div>
                   </div>
                 </article>
@@ -258,6 +270,11 @@ export default function AdminBuildingsPage() {
             Keep location and contact details up to date for dispatch and reporting.
           </p>
 
+          {!isAdmin ? (
+            <div className="mt-4">
+              <AccessNotice message="Building maintenance data can only be managed by admin users." />
+            </div>
+          ) : (
           <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
             <input
               value={form.name}
@@ -326,6 +343,7 @@ export default function AdminBuildingsPage() {
               ) : null}
             </div>
           </form>
+          )}
         </section>
       </div>
     </div>

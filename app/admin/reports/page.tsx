@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getAdminWorkOrders, getStatusMeta, statusFilters, type Priority, type WorkOrder, workOrders } from "../data";
+import {
+  getAdminWorkOrders,
+  getBuildingReliabilitySummary,
+  getStatusMeta,
+  getTechnicianPerformanceSnapshot,
+  getWorkloadTrend,
+  statusFilters,
+  type Priority,
+  type WorkOrder,
+  workOrders,
+} from "../data";
 
 const PAGE_SIZE = 6;
 
@@ -133,6 +143,33 @@ export default function AdminReportsPage() {
     return sortedOrders.slice(startIndex, startIndex + PAGE_SIZE);
   }, [currentPage, sortedOrders]);
 
+  const reportSummary = useMemo(
+    () => ({
+      total: sortedOrders.length,
+      critical: sortedOrders.filter((order) => order.priority === "Critical").length,
+      pendingReview: sortedOrders.filter(
+        (order) => order.status === "pc-review" || order.status === "comm-review",
+      ).length,
+      needsDispatch: sortedOrders.filter(
+        (order) => !order.technician?.trim() && order.status !== "invoice-ready",
+      ).length,
+      invoiceReady: sortedOrders.filter((order) => order.status === "invoice-ready").length,
+    }),
+    [sortedOrders],
+  );
+
+  const technicianSummary = useMemo(
+    () => getTechnicianPerformanceSnapshot(sortedOrders).slice(0, 4),
+    [sortedOrders],
+  );
+
+  const buildingSummary = useMemo(
+    () => getBuildingReliabilitySummary(sortedOrders).slice(0, 4),
+    [sortedOrders],
+  );
+
+  const workloadTrend = useMemo(() => getWorkloadTrend(sortedOrders), [sortedOrders]);
+
   const handleExportCsv = () => {
     const header = [
       "Report Code",
@@ -141,6 +178,12 @@ export default function AdminReportsPage() {
       "Status",
       "Priority",
       "Technician",
+      "Date",
+      "Arrival Time",
+      "Completion Time",
+      "Work Duration Hours",
+      "Checklist Summary",
+      "Notes Count",
       "Called Person",
       "Issue",
     ];
@@ -152,6 +195,14 @@ export default function AdminReportsPage() {
       order.status,
       order.priority,
       order.technician,
+      order.date,
+      order.arrivalTime,
+      order.completionTime,
+      order.workDurationHours,
+      order.checklistResults
+        ? `${order.checklistResults.checkedCount}/${order.checklistResults.totalCount}`
+        : null,
+      order.notes.length,
       order.calledPerson,
       order.issue,
     ]);
@@ -167,6 +218,159 @@ export default function AdminReportsPage() {
     link.download = `maintenance-reports-${status}-${Date.now()}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handlePrintSummary = () => {
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) {
+      return;
+    }
+
+    const rows = sortedOrders
+      .slice(0, 20)
+      .map(
+        (order) => `
+          <tr>
+            <td>${order.reportCode}</td>
+            <td>${order.building}</td>
+            <td>${order.status}</td>
+            <td>${order.priority}</td>
+            <td>${order.technician ?? "Unassigned"}</td>
+          </tr>`,
+      )
+      .join("");
+
+    const technicianRows = technicianSummary.length
+      ? technicianSummary
+          .map(
+            (tech) => `
+              <tr>
+                <td>${tech.name}</td>
+                <td>${tech.team}</td>
+                <td>${tech.openJobs}</td>
+                <td>${tech.scheduledVisits}</td>
+                <td>${tech.utilization}</td>
+              </tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="5">No technician summary available for the current filter.</td></tr>`;
+
+    const buildingRows = buildingSummary.length
+      ? buildingSummary
+          .map(
+            (building) => `
+              <tr>
+                <td>${building.building}</td>
+                <td>${building.openTickets}</td>
+                <td>${building.criticalTickets}</td>
+                <td>${building.reviewBacklog}</td>
+                <td>${building.riskScore}</td>
+              </tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="5">No building hotspot summary available for the current filter.</td></tr>`;
+
+    const trendRows = workloadTrend.length
+      ? workloadTrend
+          .map(
+            (point) => `
+              <tr>
+                <td>${point.label}</td>
+                <td>${point.opened}</td>
+                <td>${point.reviewReady}</td>
+                <td>${point.closed}</td>
+              </tr>`,
+          )
+          .join("")
+      : `<tr><td colspan="4">Not enough dated activity is available for a trend summary.</td></tr>`;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Maintenance Report Summary</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #0f172a; }
+            h1 { margin-bottom: 8px; }
+            h2 { margin: 24px 0 8px; }
+            .meta { margin-bottom: 20px; color: #475569; }
+            .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+            .card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 12px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f8fafc; }
+          </style>
+        </head>
+        <body>
+          <h1>Maintenance Report Summary</h1>
+          <p class="meta">Status filter: ${status} · Search: ${query || "All tickets"} · Generated: ${new Date().toLocaleString("en-GB")}</p>
+          <div class="grid">
+            <div class="card"><strong>Total</strong><br/>${reportSummary.total}</div>
+            <div class="card"><strong>Critical</strong><br/>${reportSummary.critical}</div>
+            <div class="card"><strong>Pending Review</strong><br/>${reportSummary.pendingReview}</div>
+            <div class="card"><strong>Need Dispatch</strong><br/>${reportSummary.needsDispatch}</div>
+            <div class="card"><strong>Invoice Ready</strong><br/>${reportSummary.invoiceReady}</div>
+          </div>
+          <p class="meta"><strong>Supervisor note:</strong> Use the Weekly briefing in the admin portal to compare this ticket pack against the live SLA and completion review view.</p>
+          <p class="meta"><strong>Meeting checklist:</strong> validate dispatch pressure, approval backlog, and the top risk building before sign-off.</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Report Code</th>
+                <th>Building</th>
+                <th>Status</th>
+                <th>Priority</th>
+                <th>Technician</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+
+          <h2>Technician focus</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Technician</th>
+                <th>Team</th>
+                <th>Open Jobs</th>
+                <th>Scheduled Visits</th>
+                <th>Utilization</th>
+              </tr>
+            </thead>
+            <tbody>${technicianRows}</tbody>
+          </table>
+
+          <h2>Building hotspots</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Building</th>
+                <th>Open Tickets</th>
+                <th>Critical</th>
+                <th>Review Backlog</th>
+                <th>Risk Score</th>
+              </tr>
+            </thead>
+            <tbody>${buildingRows}</tbody>
+          </table>
+
+          <h2>Recent workload trend</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Opened</th>
+                <th>Review Ready</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody>${trendRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   return (
@@ -192,6 +396,20 @@ export default function AdminReportsPage() {
             >
               Export CSV
             </button>
+            <button
+              type="button"
+              onClick={handlePrintSummary}
+              disabled={sortedOrders.length === 0}
+              className="rounded-xl border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Print summary
+            </button>
+            <Link
+              href="/admin/analytics?granularity=weekly&limit=6&slaMinutes=60"
+              className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+            >
+              Weekly briefing
+            </Link>
             <Link
               href="/admin"
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
@@ -248,6 +466,89 @@ export default function AdminReportsPage() {
               <option value="desc">Newest / High first</option>
               <option value="asc">A → Z / Low first</option>
             </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {[
+          { label: "Visible Tickets", value: reportSummary.total, helper: "current filtered result set" },
+          { label: "Critical", value: reportSummary.critical, helper: "highest-priority issues" },
+          { label: "Pending Review", value: reportSummary.pendingReview, helper: "PC / commercial backlog" },
+          { label: "Need Dispatch", value: reportSummary.needsDispatch, helper: "still unassigned" },
+          { label: "Invoice Ready", value: reportSummary.invoiceReady, helper: "ready for billing" },
+        ].map((card) => (
+          <div key={card.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{card.label}</p>
+            <p className="mt-2 text-3xl font-semibold text-slate-900">{card.value}</p>
+            <p className="mt-1 text-sm text-slate-500">{card.helper}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Management snapshot</h2>
+              <p className="text-sm text-slate-500">Trend, technician, and building highlights for the current filtered ticket set.</p>
+            </div>
+            <Link href="/admin/analytics" className="text-sm font-semibold text-emerald-700 hover:text-emerald-900">
+              Full analytics →
+            </Link>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {workloadTrend.length > 0 ? (
+              workloadTrend.map((point) => (
+                <div key={point.key} className="rounded-2xl bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{point.label}</p>
+                  <p className="mt-2 text-sm text-slate-700">Opened: {point.opened}</p>
+                  <p className="text-sm text-slate-500">Review: {point.reviewReady} · Closed: {point.closed}</p>
+                </div>
+              ))
+            ) : (
+              <p className="rounded-2xl bg-slate-50 p-3 text-sm text-slate-500 sm:col-span-3">
+                Not enough dated activity is available yet for a live workload trend.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Top focus areas</h2>
+          <div className="mt-4 space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Technicians</p>
+              <div className="mt-2 space-y-2">
+                {technicianSummary.length > 0 ? (
+                  technicianSummary.map((tech) => (
+                    <div key={tech.name} className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      <p className="font-medium text-slate-900">{tech.name} · {tech.utilization}</p>
+                      <p>{tech.openJobs} open · {tech.scheduledVisits} scheduled · {tech.completedJobs} closed/reviewed</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-500">No technician signals available.</p>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Buildings</p>
+              <div className="mt-2 space-y-2">
+                {buildingSummary.length > 0 ? (
+                  buildingSummary.map((building) => (
+                    <div key={building.building} className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                      <p className="font-medium text-slate-900">{building.building}</p>
+                      <p>{building.openTickets} open · {building.criticalTickets} critical · risk {building.riskScore}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-500">No building hotspot signals available.</p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </section>

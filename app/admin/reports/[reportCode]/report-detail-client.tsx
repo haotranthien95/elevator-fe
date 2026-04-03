@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AccessNotice, useAdminPermissions } from "../../components/admin-role-provider";
 import { getStatusMeta, type ActivityNote, type Priority, type WorkOrder, type WorkOrderStatus } from "../../data";
 
 const statusOptions: Array<{ value: WorkOrderStatus; label: string }> = [
@@ -17,6 +18,14 @@ const statusOptions: Array<{ value: WorkOrderStatus; label: string }> = [
 
 const priorityOptions: Priority[] = ["Low", "Medium", "High", "Critical"];
 const noteKindOptions: ActivityNote["kind"][] = ["system", "dispatch", "review", "finance"];
+
+type TechnicianOption = {
+  id: string;
+  name: string;
+  team: string | null;
+  specialty: string | null;
+  isActive: boolean;
+};
 
 function noteTone(kind: ActivityNote["kind"]) {
   switch (kind) {
@@ -42,11 +51,13 @@ async function parseActionResponse(response: Response) {
 
 export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
   const router = useRouter();
+  const { canManageOperations } = useAdminPermissions();
   const meta = getStatusMeta(workOrder.status);
   const [status, setStatus] = useState<WorkOrderStatus>(workOrder.status);
   const [statusAuthor, setStatusAuthor] = useState("Operations Team");
   const [statusNote, setStatusNote] = useState("");
   const [assignedTo, setAssignedTo] = useState(workOrder.technician ?? "");
+  const [technicians, setTechnicians] = useState<TechnicianOption[]>([]);
   const [priority, setPriority] = useState<Priority>(workOrder.priority);
   const [assignAuthor, setAssignAuthor] = useState("Dispatcher");
   const [assignNote, setAssignNote] = useState("");
@@ -55,6 +66,40 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
   const [noteText, setNoteText] = useState("");
   const [busyAction, setBusyAction] = useState<"status" | "assign" | "note" | null>(null);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const assignmentOptions = useMemo(() => {
+    const activeTechnicians = technicians.filter((item) => item.isActive);
+
+    if (assignedTo && !activeTechnicians.some((item) => item.name === assignedTo)) {
+      return [
+        { id: `legacy-${assignedTo}`, name: assignedTo, team: "Legacy", specialty: null, isActive: true },
+        ...activeTechnicians,
+      ];
+    }
+
+    return activeTechnicians;
+  }, [assignedTo, technicians]);
+
+  useEffect(() => {
+    async function loadTechnicians() {
+      try {
+        const response = await fetch("/api/admin/technicians?activeOnly=true", {
+          cache: "no-store",
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | { data?: TechnicianOption[] }
+          | null;
+
+        if (response.ok) {
+          setTechnicians(payload?.data ?? []);
+        }
+      } catch {
+        // Keep the current assignment value as fallback.
+      }
+    }
+
+    void loadTechnicians();
+  }, []);
 
   const summaryCards = useMemo(
     () => [
@@ -70,8 +115,19 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
     [workOrder],
   );
 
+  const checklistResults = workOrder.checklistResults;
+
   const handleStatusSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!canManageOperations) {
+      setFeedback({
+        type: "error",
+        message: "Your role has read-only access for ticket actions.",
+      });
+      return;
+    }
+
     setBusyAction("status");
     setFeedback(null);
 
@@ -103,8 +159,21 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
 
   const handleAssignSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!canManageOperations) {
+      setFeedback({
+        type: "error",
+        message: "Your role has read-only access for ticket actions.",
+      });
+      return;
+    }
+
     setBusyAction("assign");
     setFeedback(null);
+
+    const selectedTechnician = assignmentOptions.find(
+      (technician) => technician.name === assignedTo && !technician.id.startsWith("legacy-"),
+    );
 
     try {
       await parseActionResponse(
@@ -112,6 +181,7 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            assignedTechnicianId: selectedTechnician?.id,
             assignedTo,
             priority,
             author: assignAuthor,
@@ -135,6 +205,15 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
 
   const handleNoteSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!canManageOperations) {
+      setFeedback({
+        type: "error",
+        message: "Your role has read-only access for ticket actions.",
+      });
+      return;
+    }
+
     setBusyAction("note");
     setFeedback(null);
 
@@ -244,132 +323,199 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Checklist review</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Structured inspection results captured from the field submission.
+                </p>
+              </div>
+              {checklistResults ? (
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  {checklistResults.checkedCount}/{checklistResults.totalCount} checked
+                </span>
+              ) : null}
+            </div>
+
+            {checklistResults ? (
+              <div className="mt-4 space-y-4">
+                {(checklistResults.templateName || checklistResults.equipmentType) && (
+                  <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                    Template: {checklistResults.templateName ?? "Standard checklist"}
+                    {checklistResults.equipmentType ? ` · ${checklistResults.equipmentType}` : ""}
+                  </div>
+                )}
+
+                {checklistResults.categories.map((group, groupIndex) => (
+                  <div key={`${group.category}-${groupIndex}`} className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-sm font-semibold text-slate-900">{group.category}</p>
+                    <div className="mt-3 space-y-2">
+                      {group.items.map((item, itemIndex) => (
+                        <div
+                          key={`${item.label}-${itemIndex}`}
+                          className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-sm ${
+                            item.checked
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                              : "border-slate-200 bg-slate-50 text-slate-600"
+                          }`}
+                        >
+                          <span>{item.label}</span>
+                          <span className="text-xs font-semibold uppercase tracking-[0.2em]">
+                            {item.checked ? "OK" : "Pending"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500">
+                No structured checklist data has been attached to this report yet.
+              </p>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Ticket actions</h2>
             <p className="mt-1 text-sm text-slate-500">
               Update the workflow, assign the technician, and leave internal notes from this page.
             </p>
 
-            <div className="mt-4 space-y-4">
-              <form onSubmit={handleStatusSubmit} className="rounded-2xl border border-slate-200 p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Change status</h3>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <select
-                    value={status}
-                    onChange={(event) => setStatus(event.target.value as WorkOrderStatus)}
-                    className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={statusAuthor}
-                    onChange={(event) => setStatusAuthor(event.target.value)}
-                    placeholder="Updated by"
-                    className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+            {!canManageOperations ? (
+              <div className="mt-4">
+                <AccessNotice message="This account can review the work order history, but only dispatchers and admins can change status, assignments, or internal notes." />
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                <form onSubmit={handleStatusSubmit} className="rounded-2xl border border-slate-200 p-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Change status</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <select
+                      value={status}
+                      onChange={(event) => setStatus(event.target.value as WorkOrderStatus)}
+                      className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                    >
+                      {statusOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={statusAuthor}
+                      onChange={(event) => setStatusAuthor(event.target.value)}
+                      placeholder="Updated by"
+                      className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                    />
+                  </div>
+                  <textarea
+                    value={statusNote}
+                    onChange={(event) => setStatusNote(event.target.value)}
+                    rows={3}
+                    placeholder="Optional note for the status change"
+                    className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
                   />
-                </div>
-                <textarea
-                  value={statusNote}
-                  onChange={(event) => setStatusNote(event.target.value)}
-                  rows={3}
-                  placeholder="Optional note for the status change"
-                  className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                />
-                <button
-                  type="submit"
-                  disabled={busyAction === "status"}
-                  className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {busyAction === "status" ? "Saving..." : "Update status"}
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={busyAction === "status"}
+                    className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {busyAction === "status" ? "Saving..." : "Update status"}
+                  </button>
+                </form>
 
-              <form onSubmit={handleAssignSubmit} className="rounded-2xl border border-slate-200 p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Assign technician</h3>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <input
-                    value={assignedTo}
-                    onChange={(event) => setAssignedTo(event.target.value)}
-                    placeholder="Assigned to"
-                    className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                <form onSubmit={handleAssignSubmit} className="rounded-2xl border border-slate-200 p-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Assign technician</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <select
+                      value={assignedTo}
+                      onChange={(event) => setAssignedTo(event.target.value)}
+                      className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                      required
+                    >
+                      <option value="">Select technician</option>
+                      {assignmentOptions.map((technician) => (
+                        <option key={technician.id} value={technician.name}>
+                          {technician.name}
+                          {technician.team ? ` · ${technician.team}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={priority}
+                      onChange={(event) => setPriority(event.target.value as Priority)}
+                      className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                    >
+                      {priorityOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      value={assignAuthor}
+                      onChange={(event) => setAssignAuthor(event.target.value)}
+                      placeholder="Assigned by"
+                      className="sm:col-span-2 rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                    />
+                  </div>
+                  <textarea
+                    value={assignNote}
+                    onChange={(event) => setAssignNote(event.target.value)}
+                    rows={3}
+                    placeholder="Optional dispatch note"
+                    className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={busyAction === "assign"}
+                    className="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {busyAction === "assign" ? "Saving..." : "Save assignment"}
+                  </button>
+                </form>
+
+                <form onSubmit={handleNoteSubmit} className="rounded-2xl border border-slate-200 p-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Add internal note</h3>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <input
+                      value={noteAuthor}
+                      onChange={(event) => setNoteAuthor(event.target.value)}
+                      placeholder="Author"
+                      className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                      required
+                    />
+                    <select
+                      value={noteKind}
+                      onChange={(event) => setNoteKind(event.target.value as ActivityNote["kind"])}
+                      className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                    >
+                      {noteKindOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <textarea
+                    value={noteText}
+                    onChange={(event) => setNoteText(event.target.value)}
+                    rows={4}
+                    placeholder="Write a note for the operations history..."
+                    className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
                     required
                   />
-                  <select
-                    value={priority}
-                    onChange={(event) => setPriority(event.target.value as Priority)}
-                    className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                  <button
+                    type="submit"
+                    disabled={busyAction === "note"}
+                    className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70"
                   >
-                    {priorityOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={assignAuthor}
-                    onChange={(event) => setAssignAuthor(event.target.value)}
-                    placeholder="Assigned by"
-                    className="sm:col-span-2 rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                  />
-                </div>
-                <textarea
-                  value={assignNote}
-                  onChange={(event) => setAssignNote(event.target.value)}
-                  rows={3}
-                  placeholder="Optional dispatch note"
-                  className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                />
-                <button
-                  type="submit"
-                  disabled={busyAction === "assign"}
-                  className="mt-3 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {busyAction === "assign" ? "Saving..." : "Save assignment"}
-                </button>
-              </form>
-
-              <form onSubmit={handleNoteSubmit} className="rounded-2xl border border-slate-200 p-4">
-                <h3 className="text-sm font-semibold text-slate-900">Add internal note</h3>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <input
-                    value={noteAuthor}
-                    onChange={(event) => setNoteAuthor(event.target.value)}
-                    placeholder="Author"
-                    className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                    required
-                  />
-                  <select
-                    value={noteKind}
-                    onChange={(event) => setNoteKind(event.target.value as ActivityNote["kind"])}
-                    className="rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                  >
-                    {noteKindOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <textarea
-                  value={noteText}
-                  onChange={(event) => setNoteText(event.target.value)}
-                  rows={4}
-                  placeholder="Write a note for the operations history..."
-                  className="mt-3 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={busyAction === "note"}
-                  className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {busyAction === "note" ? "Saving..." : "Add note"}
-                </button>
-              </form>
-            </div>
+                    {busyAction === "note" ? "Saving..." : "Add note"}
+                  </button>
+                </form>
+              </div>
+            )}
           </section>
         </div>
 
