@@ -18,17 +18,19 @@ export const metadata: Metadata = {
 
 const navItems = [
   { label: "Dashboard", href: "/admin" },
-  { label: "Alerts", href: "/admin/alerts" },
-  { label: "Analytics", href: "/admin/analytics" },
+  // { label: "Alerts", href: "/admin/alerts" },
+  // { label: "Analytics", href: "/admin/analytics" },
   { label: "Work Orders", href: "/admin/reports" },
   { label: "Buildings", href: "/admin/buildings" },
-  { label: "Equipment", href: "/admin/equipment" },
-  { label: "Equipment Types", href: "/admin/equipment-types" },
+  // { label: "Equipment", href: "/admin/equipment" },
+  // { label: "Equipment Types", href: "/admin/equipment-types" },
   { label: "Technicians", href: "/admin/technicians" },
-  { label: "Schedules", href: "/admin/schedules" },
-  { label: "Checklists", href: "/admin/checklists" },
-  { label: "Audit Logs", href: "/admin/audit-logs", roles: ["admin"] },
-  { label: "Users", href: "/admin/users", roles: ["admin"] },
+  // { label: "Schedules", href: "/admin/schedules" },
+  // { label: "Checklists", href: "/admin/checklists" },
+  { label: "Reports", href: "/admin/reports" },
+  { label: "Settings", href: "#", roles: ["admin"] },
+  // { label: "Audit Logs", href: "/admin/audit-logs", roles: ["admin"] },
+  // { label: "Users", href: "/admin/users", roles: ["admin"] },
 ];
 
 const upcomingModules = ["Automated reminders"];
