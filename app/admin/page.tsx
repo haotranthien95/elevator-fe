@@ -19,9 +19,9 @@ import {
 
 
 const quickActions = [
-  { label: "Open work orders", href: "/admin/reports" },
+  { label: "Open work orders", href: "/admin/work-orders" },
   { label: "Alerts", href: "/admin/alerts" },
-  { label: "Analytics", href: "/admin/analytics" },
+  { label: "Analytics", href: "/admin/reports" },
   { label: "Manage buildings", href: "/admin/buildings" },
   { label: "Manage equipment", href: "/admin/equipment" },
   { label: "Plan schedules", href: "/admin/schedules" },
@@ -126,7 +126,7 @@ export default async function AdminDashboardPage() {
             <div>
               <h2 className="text-[1.5rem] font-bold tracking-tight text-on-surface">Recent work orders</h2>
             </div>
-            <Link href="/admin/reports" className="text-[0.875rem] font-bold text-primary hover:text-primary-container tracking-wide transition-colors">
+            <Link href="/admin/work-orders" className="text-[0.875rem] font-bold text-primary hover:text-primary-container tracking-wide transition-colors">
               View all
             </Link>
           </div>
@@ -137,7 +137,7 @@ export default async function AdminDashboardPage() {
               return (
                 <Link
                   key={`${item.reportCode || "report"}-${index}`}
-                  href={`/admin/reports/${item.reportCode}`}
+                  href={`/admin/work-orders/${item.reportCode}`}
                   className="group block rounded-[16px] bg-surface-lowest p-6 transition-all duration-300 hover:bg-surface-high border-l-[4px] border-primary/50 hover:border-primary shadow-[0_4px_12px_rgba(24,28,30,0.03)] hover:shadow-[0_12px_24px_rgba(24,28,30,0.06)] hover:-translate-y-0.5"
                 >
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

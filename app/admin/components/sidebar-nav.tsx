@@ -7,8 +7,8 @@ import { FileText, LayoutDashboard, ShieldAlert, Wrench, Building, Users, Settin
 const navItems = [
   { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
   // { label: "Alerts", href: "/admin/alerts", icon: ShieldAlert },
-  // { label: "Analytics", href: "/admin/analytics" },
-  { label: "Work Orders", href: "/admin/reports", icon: Wrench },
+  // { label: "Analytics", href: "/admin/reports" },
+  { label: "Work Orders", href: "/admin/work-orders", icon: Wrench },
   { label: "Buildings", href: "/admin/buildings", icon: Building },
   // { label: "Equipment", href: "/admin/equipment" },
   // { label: "Equipment Types", href: "/admin/equipment-types" },

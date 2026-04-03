@@ -133,7 +133,7 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
 
     try {
       await parseActionResponse(
-        await fetch(`/api/admin/reports/${encodeURIComponent(workOrder.reportCode)}/status`, {
+        await fetch(`/api/admin/work-orders/${encodeURIComponent(workOrder.reportCode)}/status`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -177,7 +177,7 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
 
     try {
       await parseActionResponse(
-        await fetch(`/api/admin/reports/${encodeURIComponent(workOrder.reportCode)}/assign`, {
+        await fetch(`/api/admin/work-orders/${encodeURIComponent(workOrder.reportCode)}/assign`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -219,7 +219,7 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
 
     try {
       await parseActionResponse(
-        await fetch(`/api/admin/reports/${encodeURIComponent(workOrder.reportCode)}/notes`, {
+        await fetch(`/api/admin/work-orders/${encodeURIComponent(workOrder.reportCode)}/notes`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -267,7 +267,7 @@ export function ReportDetailClient({ workOrder }: { workOrder: WorkOrder }) {
               {workOrder.priority}
             </span>
             <Link
-              href="/admin/reports"
+              href="/admin/work-orders"
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >
               Back to list
