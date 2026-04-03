@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { LayoutDashboard, Wrench, Users, Building, FileText, Settings, ShieldAlert } from "lucide-react";
 import {
   ADMIN_SESSION_COOKIE,
   decodeAdminSession,
@@ -17,18 +18,18 @@ export const metadata: Metadata = {
 };
 
 const navItems = [
-  { label: "Dashboard", href: "/admin" },
-  // { label: "Alerts", href: "/admin/alerts" },
+  { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  // { label: "Alerts", href: "/admin/alerts", icon: ShieldAlert },
   // { label: "Analytics", href: "/admin/analytics" },
-  { label: "Work Orders", href: "/admin/reports" },
-  { label: "Buildings", href: "/admin/buildings" },
+  { label: "Work Orders", href: "/admin/reports", icon: Wrench },
+  { label: "Buildings", href: "/admin/buildings", icon: Building },
   // { label: "Equipment", href: "/admin/equipment" },
   // { label: "Equipment Types", href: "/admin/equipment-types" },
-  { label: "Technicians", href: "/admin/technicians" },
+  { label: "Technicians", href: "/admin/technicians", icon: Users },
   // { label: "Schedules", href: "/admin/schedules" },
   // { label: "Checklists", href: "/admin/checklists" },
-  { label: "Reports", href: "/admin/reports" },
-  { label: "Settings", href: "#", roles: ["admin"] },
+  { label: "Reports", href: "/admin/reports", icon: FileText },
+  { label: "Settings", href: "#", roles: ["admin"], icon: Settings },
   // { label: "Audit Logs", href: "/admin/audit-logs", roles: ["admin"] },
   // { label: "Users", href: "/admin/users", roles: ["admin"] },
 ];
@@ -63,26 +64,30 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           </div>
 
           <nav className="flex-1 px-4 py-5">
-            <div className="space-y-[1px]">
-              {visibleNavItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="block rounded-xl px-3 py-2.5 text-sm font-medium text-on-surface-variant transition hover:bg-surface-high hover:text-on-surface"
-                >
-                  {item.label}
-                </Link>
-              ))}
+            <div className="space-y-[2px]">
+              {visibleNavItems.map((item) => {
+                const Icon = (item as any).icon || FileText;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="group flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[0.875rem] font-medium text-on-surface-variant transition-all duration-200 ease-in-out hover:bg-surface-high hover:text-on-surface hover:shadow-[0_2px_8px_rgba(24,28,30,0.04)]"
+                  >
+                    <Icon className="h-5 w-5 opacity-70 group-hover:opacity-100 group-hover:text-primary transition-opacity" />
+                    {item.label}
+                  </Link>
+                );
+              })}
             </div>
 
-            <p className="mb-3 mt-8 px-3 text-[10px] font-bold uppercase tracking-[0.25em] text-on-surface-variant/70">
+            <p className="mb-3 mt-8 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.25em] text-on-surface-variant/70">
               Extensions
             </p>
             <div className="space-y-1">
               {upcomingModules.map((label) => (
                 <div
                   key={label}
-                  className="rounded-xl bg-surface-lowest/50 px-3 py-2 text-sm text-on-surface-variant"
+                  className="rounded-[12px] bg-surface-lowest/40 px-3 py-2.5 text-[0.875rem] text-on-surface-variant font-medium border border-outline-variant/10 shadow-[0_2px_8px_rgba(24,28,30,0.02)]"
                 >
                   {label}
                 </div>
@@ -93,7 +98,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <div className="px-4 py-6">
             <Link
               href="/"
-              className="inline-flex w-full items-center justify-center rounded-xl bg-gradient-to-b from-primary to-primary-container px-3 py-2.5 text-sm font-medium text-white shadow-[0_4px_14px_rgba(0,64,223,0.25)] transition hover:shadow-[0_6px_20px_rgba(0,64,223,0.3)]"
+              className="inline-flex w-full items-center justify-center rounded-[12px] bg-gradient-to-b from-primary to-primary-container px-3 py-2.5 text-[0.875rem] font-medium text-white shadow-[0_12px_24px_rgba(0,64,223,0.15)] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-[0_16px_32px_rgba(0,64,223,0.25)] hover:from-[#1a55f0] hover:to-[#3b66ff]"
             >
               Public Dispatch
             </Link>
@@ -101,13 +106,13 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col bg-background">
-          <header className="bg-background pt-6 pb-2">
+          <header className="bg-background pt-6 pb-2 sticky top-0 z-20 backdrop-blur-md bg-opacity-90">
             <div className="flex flex-col gap-3 px-4 sm:px-6 lg:flex-row lg:items-end lg:justify-between lg:px-8">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">
+                <p className="text-[0.6875rem] font-bold uppercase tracking-[0.25em] text-on-surface-variant">
                   Workspace
                 </p>
-                <h2 className="text-[2.25rem] font-semibold text-on-surface leading-tight tracking-tight mt-1">
+                <h2 className="text-[2.25rem] font-semibold text-on-surface leading-tight tracking-tight mt-1 transition-all">
                   Ops Dashboard
                 </h2>
               </div>
