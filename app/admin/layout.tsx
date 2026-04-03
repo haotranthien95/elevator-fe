@@ -11,6 +11,7 @@ import {
 } from "@/lib/admin-auth";
 import { AdminRoleProvider } from "./components/admin-role-provider";
 import { LogoutButton } from "./components/logout-button";
+import { SidebarNav } from "./components/sidebar-nav";
 
 export const metadata: Metadata = {
   title: "Admin Portal | Maintenance Service Report",
@@ -64,21 +65,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           </div>
 
           <nav className="flex-1 px-4 py-5">
-            <div className="space-y-[2px]">
-              {visibleNavItems.map((item) => {
-                const Icon = (item as any).icon || FileText;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className="group flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[0.875rem] font-medium text-on-surface-variant transition-all duration-200 ease-in-out hover:bg-surface-high hover:text-on-surface hover:shadow-[0_2px_8px_rgba(24,28,30,0.04)]"
-                  >
-                    <Icon className="h-5 w-5 opacity-70 group-hover:opacity-100 group-hover:text-primary transition-opacity" />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
+            <SidebarNav visibleNavItems={visibleNavItems} />
 
             <p className="mb-3 mt-8 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.25em] text-on-surface-variant/70">
               Extensions
