@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { LayoutDashboard, Wrench, Users, Building, FileText, Settings, ShieldAlert } from "lucide-react";
 import {
   ADMIN_SESSION_COOKIE,
   decodeAdminSession,
@@ -18,23 +17,6 @@ export const metadata: Metadata = {
   description: "Operations dashboard for maintenance tickets, dispatch, and review flow.",
 };
 
-const navItems = [
-  { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  // { label: "Alerts", href: "/admin/alerts", icon: ShieldAlert },
-  // { label: "Analytics", href: "/admin/analytics" },
-  { label: "Work Orders", href: "/admin/reports", icon: Wrench },
-  { label: "Buildings", href: "/admin/buildings", icon: Building },
-  // { label: "Equipment", href: "/admin/equipment" },
-  // { label: "Equipment Types", href: "/admin/equipment-types" },
-  { label: "Technicians", href: "/admin/technicians", icon: Users },
-  // { label: "Schedules", href: "/admin/schedules" },
-  // { label: "Checklists", href: "/admin/checklists" },
-  { label: "Reports", href: "/admin/reports", icon: FileText },
-  { label: "Settings", href: "#", roles: ["admin"], icon: Settings },
-  // { label: "Audit Logs", href: "/admin/audit-logs", roles: ["admin"] },
-  // { label: "Users", href: "/admin/users", roles: ["admin"] },
-];
-
 const upcomingModules = ["Automated reminders"];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
@@ -43,12 +25,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const isAuthenticated = hasValidAdminSession(sessionValue);
   const session = decodeAdminSession(sessionValue);
   const currentRole = session?.role ?? "viewer";
-  const visibleNavItems = isAuthenticated
-    ? navItems.filter((item) => !item.roles || item.roles.includes(currentRole))
-    : [
-        { label: "Admin Login", href: "/admin/login" },
-        { label: "Public Form", href: "/" },
-      ];
 
   return (
     <div className="min-h-screen bg-background text-on-surface">
@@ -65,7 +41,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           </div>
 
           <nav className="flex-1 px-4 py-5">
-            <SidebarNav visibleNavItems={visibleNavItems} />
+            <SidebarNav isAuthenticated={isAuthenticated} currentRole={currentRole} />
 
             <p className="mb-3 mt-8 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.25em] text-on-surface-variant/70">
               Extensions
